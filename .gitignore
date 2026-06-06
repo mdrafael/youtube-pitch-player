@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+bin/
+temp-test/
+yt-dlp.exe
+*.log
+.DS_Store

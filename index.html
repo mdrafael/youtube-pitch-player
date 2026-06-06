@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Pitch Player</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="logo">
+          <span class="logo-icon" aria-hidden="true">♪</span>
+          <h1>YouTube Pitch Player</h1>
+        </div>
+        <p class="subtitle">Incorpore vídeos e ajuste o tom do áudio em tempo real</p>
+      </header>
+
+      <main class="main">
+        <section class="input-section" aria-label="Carregar vídeo">
+          <form id="load-form" class="url-form">
+            <label for="video-url" class="sr-only">URL do vídeo do YouTube</label>
+            <div class="url-input-wrap">
+              <input
+                type="url"
+                id="video-url"
+                name="video-url"
+                placeholder="Cole o link do YouTube..."
+                autocomplete="off"
+                required
+              />
+              <button type="submit" id="load-btn" class="btn btn-primary">
+                <span class="btn-text">Carregar vídeo</span>
+                <span class="btn-spinner" hidden aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+
+          <progress id="progress-bar" class="progress-bar" max="100" value="0" hidden></progress>
+          <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="player-section" class="player-section" hidden>
+          <div class="video-wrapper">
+            <div id="youtube-player"></div>
+          </div>
+
+          <div id="pitch-panel" class="pitch-panel" hidden>
+            <div class="pitch-header">
+              <h2>Tom do áudio (pitch)</h2>
+              <span id="pitch-value" class="pitch-value">0 semitons</span>
+            </div>
+
+            <div class="pitch-controls">
+              <span class="pitch-label" aria-hidden="true">−</span>
+              <input
+                type="range"
+                id="pitch-slider"
+                class="pitch-slider"
+                min="-12"
+                max="12"
+                step="0.5"
+                value="0"
+                aria-label="Tom em semitons"
+              />
+              <span class="pitch-label" aria-hidden="true">+</span>
+            </div>
+
+            <div class="pitch-actions">
+              <button type="button" id="reset-pitch-btn" class="btn btn-secondary">Resetar tom</button>
+            </div>
+
+            <p class="pitch-hint">
+              O vídeo é exibido pelo YouTube (sem som). O áudio é processado em tempo real pela
+              Web Audio API — ajuste o slider enquanto o vídeo toca.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>YouTube IFrame API · Web Audio · SoundTouch</p>
+      </footer>
+    </div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

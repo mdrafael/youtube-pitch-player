@@ -1,0 +1,23 @@
+{
+  "name": "youtube-pitch-player",
+  "version": "2.0.0",
+  "description": "YouTube embed com extração de áudio MP3 e controle de pitch",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"node server.js\" \"vite\"",
+    "start": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@soundtouchjs/audio-worklet": "^2.0.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "ffmpeg-static": "^5.2.0",
+    "yt-dlp-wrap": "^2.3.12"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "vite": "^6.2.0"
+  }
+}
