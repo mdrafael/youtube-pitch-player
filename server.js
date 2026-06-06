@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, writeFile, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import ytDlpModule from 'yt-dlp-wrap';
 import ffmpegPath from 'ffmpeg-static';
@@ -11,6 +11,7 @@ const YTDlpWrap = ytDlpModule.default ?? ytDlpModule;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
+const NODE_BIN = process.execPath;
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
   : ['http://localhost:5173', 'http://localhost:4173'];
@@ -22,23 +23,26 @@ const COOKIES_FILE = path.join(BIN_DIR, 'youtube-cookies.txt');
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-/** Estratégias para contornar bloqueio do YouTube em IPs de datacenter. */
 const YTDLP_STRATEGIES = [
   {
-    name: 'tv_embedded+android_vr',
-    args: ['--extractor-args', 'youtube:player_client=tv_embedded,android_vr,tv'],
+    name: 'bestaudio/tv_embedded',
+    mode: 'bestaudio',
+    args: ['--extractor-args', 'youtube:player_client=tv_embedded,android_vr,tv_downgraded'],
   },
   {
-    name: 'android+web',
+    name: 'bestaudio/android',
+    mode: 'bestaudio',
     args: ['--extractor-args', 'youtube:player_client=android,web'],
   },
   {
-    name: 'ios+mweb',
-    args: ['--extractor-args', 'youtube:player_client=ios,mweb'],
+    name: 'mp3/tv_embedded',
+    mode: 'mp3',
+    args: ['--extractor-args', 'youtube:player_client=tv_embedded,android_vr,tv_downgraded'],
   },
   {
-    name: 'web_safari',
-    args: ['--extractor-args', 'youtube:player_client=web_safari,web'],
+    name: 'mp3/ios',
+    mode: 'mp3',
+    args: ['--extractor-args', 'youtube:player_client=ios,mweb'],
   },
 ];
 
@@ -75,11 +79,14 @@ function extractVideoId(input) {
   return null;
 }
 
-function toUserError(err) {
+function toUserError(err, hasCookies) {
   const raw = String(err?.message || err || '');
 
   if (raw.includes('not a bot') || raw.includes('Sign in to confirm')) {
-    return 'O YouTube bloqueou o acesso do servidor neste momento. Tente outro vídeo ou aguarde alguns minutos.';
+    if (!hasCookies) {
+      return 'O YouTube bloqueou o servidor. O administrador precisa configurar YOUTUBE_COOKIES no Render.';
+    }
+    return 'O YouTube bloqueou temporariamente. Tente outro vídeo ou aguarde alguns minutos.';
   }
   if (raw.includes('Private video') || raw.includes('privado')) {
     return 'Este vídeo é privado ou restrito.';
@@ -106,8 +113,14 @@ async function setupCookies() {
 
 async function ensureYtDlp() {
   await mkdir(BIN_DIR, { recursive: true });
+
+  const isProduction = process.env.RENDER || process.env.NODE_ENV === 'production';
+  if (isProduction && existsSync(YTDLP_BIN)) {
+    await unlink(YTDLP_BIN).catch(() => {});
+  }
+
   if (!existsSync(YTDLP_BIN)) {
-    console.log('Baixando yt-dlp...');
+    console.log('Baixando yt-dlp (versão mais recente)...');
     await YTDlpWrap.downloadFromGithub(YTDLP_BIN);
     console.log('yt-dlp pronto.');
   }
@@ -124,15 +137,10 @@ async function findAudioFile(videoId) {
   return match ? path.join(AUDIO_DIR, match) : null;
 }
 
-function buildBaseArgs(videoId, outputTemplate, cookiesPath) {
+function buildYtDlpArgs(videoId, outputTemplate, cookiesPath, strategy) {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   const args = [
     url,
-    '-x',
-    '--audio-format',
-    'mp3',
-    '--audio-quality',
-    '5',
     '-o',
     outputTemplate,
     '--no-playlist',
@@ -142,9 +150,26 @@ function buildBaseArgs(videoId, outputTemplate, cookiesPath) {
     USER_AGENT,
     '--retries',
     '3',
-    '--ffmpeg-location',
-    ffmpegPath,
+    '--js-runtimes',
+    `node:${NODE_BIN}`,
+    '--remote-components',
+    'ejs:github',
+    ...strategy.args,
   ];
+
+  if (strategy.mode === 'bestaudio') {
+    args.push('-f', 'bestaudio');
+  } else {
+    args.push(
+      '-x',
+      '--audio-format',
+      'mp3',
+      '--audio-quality',
+      '5',
+      '--ffmpeg-location',
+      ffmpegPath,
+    );
+  }
 
   if (cookiesPath && existsSync(cookiesPath)) {
     args.push('--cookies', cookiesPath);
@@ -156,7 +181,7 @@ function buildBaseArgs(videoId, outputTemplate, cookiesPath) {
 async function runYtDlp(videoId, strategy, cookiesPath) {
   const ytDlp = new YTDlpWrap(YTDLP_BIN);
   const outputTemplate = path.join(AUDIO_DIR, `${videoId}.%(ext)s`);
-  const args = [...buildBaseArgs(videoId, outputTemplate, cookiesPath), ...strategy.args];
+  const args = buildYtDlpArgs(videoId, outputTemplate, cookiesPath, strategy);
 
   console.log(`Processando ${videoId} [${strategy.name}]`);
   await ytDlp.execPromise(args);
@@ -170,6 +195,7 @@ async function extractAudioToMp3(videoId) {
   await mkdir(AUDIO_DIR, { recursive: true });
 
   const cookiesPath = await setupCookies();
+  const hasCookies = !!(cookiesPath && existsSync(cookiesPath));
   const errors = [];
 
   for (const strategy of YTDLP_STRATEGIES) {
@@ -177,7 +203,7 @@ async function extractAudioToMp3(videoId) {
       await runYtDlp(videoId, strategy, cookiesPath);
       const audioPath = await findAudioFile(videoId);
       if (audioPath) {
-        console.log(`Áudio pronto: ${videoId}`);
+        console.log(`Áudio pronto: ${videoId} (${path.extname(audioPath)})`);
         return audioPath;
       }
     } catch (err) {
@@ -187,7 +213,7 @@ async function extractAudioToMp3(videoId) {
   }
 
   const lastError = new Error(errors.join(' | ') || 'Todas as estratégias falharam.');
-  lastError.userMessage = toUserError(lastError);
+  lastError.userMessage = toUserError(lastError, hasCookies);
   throw lastError;
 }
 
@@ -202,7 +228,7 @@ function getOrCreateExtraction(videoId) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, node: NODE_BIN });
 });
 
 app.get('/api/status/:videoId', async (req, res) => {
@@ -235,7 +261,7 @@ app.post('/api/extract/:videoId', async (req, res) => {
   } catch (err) {
     console.error('Erro no processamento:', err.message);
     res.status(500).json({
-      error: err.userMessage || toUserError(err),
+      error: err.userMessage || toUserError(err, !!process.env.YOUTUBE_COOKIES),
     });
   }
 });
@@ -265,4 +291,5 @@ app.listen(PORT, async () => {
   await mkdir(AUDIO_DIR, { recursive: true });
   await setupCookies();
   console.log(`Servidor: http://localhost:${PORT}`);
+  console.log(`Node: ${NODE_BIN}`);
 });
