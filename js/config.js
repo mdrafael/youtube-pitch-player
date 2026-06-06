@@ -1,4 +1,7 @@
-/** URL base da API. Em produção, defina VITE_API_URL no painel da Vercel. */
+/**
+ * URL base da API.
+ * Em produção na Vercel, deixe vazio — o vercel.json faz proxy de /api para o Render.
+ */
 export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 /** Monta URL completa para endpoints da API. */

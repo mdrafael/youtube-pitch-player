@@ -28,6 +28,8 @@ export class AudioPitchController {
 
     this.audioElement = document.createElement('audio');
     this.audioElement.preload = 'auto';
+    this.audioElement.crossOrigin = 'anonymous';
+    this.audioElement.preservesPitch = false;
 
     this.pitchNode = new SoundTouchNode({ context: this.audioContext });
     this.gainNode = this.audioContext.createGain();
@@ -43,7 +45,7 @@ export class AudioPitchController {
   }
 
   /**
-   * @param {string} audioUrl - URL do áudio (mesma origem via proxy)
+   * @param {string} audioUrl
    */
   async load(audioUrl) {
     await this.init();
@@ -55,7 +57,7 @@ export class AudioPitchController {
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error('Tempo esgotado ao carregar o áudio.'));
-      }, 60000);
+      }, 120000);
 
       const onReady = () => {
         cleanup();
@@ -91,10 +93,10 @@ export class AudioPitchController {
     if (!this.pitchNode || !this.audioContext) return;
 
     const time = this.audioContext.currentTime;
-    const ratio = Math.pow(2, semitones / 12);
 
+    // Usar apenas pitchSemitones; pitch=1 evita compensação dupla (doc SoundTouch)
+    this.pitchNode.pitch.setValueAtTime(1, time);
     this.pitchNode.pitchSemitones.setValueAtTime(semitones, time);
-    this.pitchNode.pitch.setValueAtTime(ratio, time);
     this.pitchNode.playbackRate.setValueAtTime(1, time);
   }
 

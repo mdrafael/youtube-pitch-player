@@ -195,7 +195,8 @@ form.addEventListener('submit', (e) => {
   loadVideo(urlInput.value);
 });
 
-pitchSlider.addEventListener('input', () => {
+pitchSlider.addEventListener('input', async () => {
+  await audioPitch.resumeContext();
   const semitones = getPitchSemitones();
   audioPitch.setPitch(semitones);
   updatePitchDisplay(semitones);
