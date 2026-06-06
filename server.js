@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import ytDlpModule from 'yt-dlp-wrap';
 import ffmpegPath from 'ffmpeg-static';
@@ -17,6 +17,30 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
 const AUDIO_DIR = path.join(__dirname, 'data', 'audio');
 const BIN_DIR = path.join(__dirname, 'bin');
 const YTDLP_BIN = path.join(BIN_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+const COOKIES_FILE = path.join(BIN_DIR, 'youtube-cookies.txt');
+
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+/** Estratégias para contornar bloqueio do YouTube em IPs de datacenter. */
+const YTDLP_STRATEGIES = [
+  {
+    name: 'tv_embedded+android_vr',
+    args: ['--extractor-args', 'youtube:player_client=tv_embedded,android_vr,tv'],
+  },
+  {
+    name: 'android+web',
+    args: ['--extractor-args', 'youtube:player_client=android,web'],
+  },
+  {
+    name: 'ios+mweb',
+    args: ['--extractor-args', 'youtube:player_client=ios,mweb'],
+  },
+  {
+    name: 'web_safari',
+    args: ['--extractor-args', 'youtube:player_client=web_safari,web'],
+  },
+];
 
 const app = express();
 app.use(
@@ -51,10 +75,39 @@ function extractVideoId(input) {
   return null;
 }
 
+function toUserError(err) {
+  const raw = String(err?.message || err || '');
+
+  if (raw.includes('not a bot') || raw.includes('Sign in to confirm')) {
+    return 'O YouTube bloqueou o acesso do servidor neste momento. Tente outro vídeo ou aguarde alguns minutos.';
+  }
+  if (raw.includes('Private video') || raw.includes('privado')) {
+    return 'Este vídeo é privado ou restrito.';
+  }
+  if (raw.includes('Video unavailable') || raw.includes('indisponível')) {
+    return 'Vídeo indisponível ou não encontrado.';
+  }
+  if (raw.includes('age-restricted') || raw.includes('confirm your age')) {
+    return 'Este vídeo tem restrição de idade e não pode ser processado.';
+  }
+
+  return 'Não foi possível preparar o áudio do vídeo. Tente novamente.';
+}
+
+async function setupCookies() {
+  const cookies = process.env.YOUTUBE_COOKIES?.trim();
+  if (!cookies) return null;
+
+  await mkdir(BIN_DIR, { recursive: true });
+  await writeFile(COOKIES_FILE, cookies, 'utf8');
+  console.log('Cookies do YouTube configurados.');
+  return COOKIES_FILE;
+}
+
 async function ensureYtDlp() {
   await mkdir(BIN_DIR, { recursive: true });
   if (!existsSync(YTDLP_BIN)) {
-    console.log('Baixando yt-dlp (primeira execução)...');
+    console.log('Baixando yt-dlp...');
     await YTDlpWrap.downloadFromGithub(YTDLP_BIN);
     console.log('yt-dlp pronto.');
   }
@@ -71,20 +124,9 @@ async function findAudioFile(videoId) {
   return match ? path.join(AUDIO_DIR, match) : null;
 }
 
-async function extractAudioToMp3(videoId) {
-  const existing = await findAudioFile(videoId);
-  if (existing) return existing;
-
-  await ensureYtDlp();
-  await mkdir(AUDIO_DIR, { recursive: true });
-
-  const ytDlp = new YTDlpWrap(YTDLP_BIN);
-  const outputTemplate = path.join(AUDIO_DIR, `${videoId}.%(ext)s`);
+function buildBaseArgs(videoId, outputTemplate, cookiesPath) {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
-
-  console.log(`Extraindo áudio: ${videoId}`);
-
-  await ytDlp.execPromise([
+  const args = [
     url,
     '-x',
     '--audio-format',
@@ -95,17 +137,58 @@ async function extractAudioToMp3(videoId) {
     outputTemplate,
     '--no-playlist',
     '--no-warnings',
+    '--no-check-certificates',
+    '--user-agent',
+    USER_AGENT,
+    '--retries',
+    '3',
     '--ffmpeg-location',
     ffmpegPath,
-  ]);
+  ];
 
-  const audioPath = await findAudioFile(videoId);
-  if (!audioPath) {
-    throw new Error('Áudio não disponível para processamento.');
+  if (cookiesPath && existsSync(cookiesPath)) {
+    args.push('--cookies', cookiesPath);
   }
 
-  console.log(`Áudio salvo: ${audioPath}`);
-  return audioPath;
+  return args;
+}
+
+async function runYtDlp(videoId, strategy, cookiesPath) {
+  const ytDlp = new YTDlpWrap(YTDLP_BIN);
+  const outputTemplate = path.join(AUDIO_DIR, `${videoId}.%(ext)s`);
+  const args = [...buildBaseArgs(videoId, outputTemplate, cookiesPath), ...strategy.args];
+
+  console.log(`Processando ${videoId} [${strategy.name}]`);
+  await ytDlp.execPromise(args);
+}
+
+async function extractAudioToMp3(videoId) {
+  const existing = await findAudioFile(videoId);
+  if (existing) return existing;
+
+  await ensureYtDlp();
+  await mkdir(AUDIO_DIR, { recursive: true });
+
+  const cookiesPath = await setupCookies();
+  const errors = [];
+
+  for (const strategy of YTDLP_STRATEGIES) {
+    try {
+      await runYtDlp(videoId, strategy, cookiesPath);
+      const audioPath = await findAudioFile(videoId);
+      if (audioPath) {
+        console.log(`Áudio pronto: ${videoId}`);
+        return audioPath;
+      }
+    } catch (err) {
+      errors.push(`${strategy.name}: ${err.message?.slice(0, 120)}`);
+      console.warn(`Falha [${strategy.name}]:`, err.message?.slice(0, 200));
+    }
+  }
+
+  const lastError = new Error(errors.join(' | ') || 'Todas as estratégias falharam.');
+  lastError.userMessage = toUserError(lastError);
+  throw lastError;
 }
 
 function getOrCreateExtraction(videoId) {
@@ -132,7 +215,7 @@ app.get('/api/status/:videoId', async (req, res) => {
   res.json({
     videoId,
     ready: !!file,
-    extracting: extractionJobs.has(videoId),
+    processing: extractionJobs.has(videoId),
   });
 });
 
@@ -150,9 +233,9 @@ app.post('/api/extract/:videoId', async (req, res) => {
       ready: true,
     });
   } catch (err) {
-    console.error('Erro na extração:', err);
+    console.error('Erro no processamento:', err.message);
     res.status(500).json({
-      error: err.message || 'Não foi possível preparar o áudio do vídeo.',
+      error: err.userMessage || toUserError(err),
     });
   }
 });
@@ -168,7 +251,11 @@ app.get('/api/audio/:videoId', async (req, res) => {
     return res.status(404).json({ error: 'Áudio ainda não disponível para processamento.' });
   }
 
-  res.setHeader('Content-Type', 'audio/mpeg');
+  const ext = path.extname(filePath).toLowerCase();
+  const mime =
+    ext === '.mp3' ? 'audio/mpeg' : ext === '.webm' ? 'audio/webm' : 'audio/mp4';
+
+  res.setHeader('Content-Type', mime);
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(filePath);
@@ -176,6 +263,6 @@ app.get('/api/audio/:videoId', async (req, res) => {
 
 app.listen(PORT, async () => {
   await mkdir(AUDIO_DIR, { recursive: true });
+  await setupCookies();
   console.log(`Servidor: http://localhost:${PORT}`);
-  console.log(`Áudios em: ${AUDIO_DIR}`);
 });

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: youtube-pitch-api
+    name: youtube-pitch-player
     runtime: node
     plan: free
     buildCommand: npm install
