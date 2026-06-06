@@ -27,6 +27,14 @@ export function extractVideoId(input) {
  * Formata semitons para exibição.
  * @param {number} semitones
  */
+/** iPhone/iPad — Chrome no iOS usa WebKit (mesmas limitações do Safari). */
+export function isIOS() {
+  return (
+    /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 export function formatPitch(semitones) {
   const rounded = Math.round(semitones * 10) / 10;
   const sign = rounded > 0 ? '+' : '';

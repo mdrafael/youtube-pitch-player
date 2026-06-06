@@ -26,21 +26,17 @@ const COOKIES_FILE = path.join(BIN_DIR, 'youtube-cookies.txt');
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+/** Somente MP3 — iOS não reproduz WebM. */
 const YTDLP_STRATEGIES = [
-  {
-    name: 'bestaudio/tv_embedded',
-    mode: 'bestaudio',
-    args: ['--extractor-args', 'youtube:player_client=tv_embedded,android_vr,tv_downgraded'],
-  },
-  {
-    name: 'bestaudio/android',
-    mode: 'bestaudio',
-    args: ['--extractor-args', 'youtube:player_client=android,web'],
-  },
   {
     name: 'mp3/tv_embedded',
     mode: 'mp3',
     args: ['--extractor-args', 'youtube:player_client=tv_embedded,android_vr,tv_downgraded'],
+  },
+  {
+    name: 'mp3/android',
+    mode: 'mp3',
+    args: ['--extractor-args', 'youtube:player_client=android,web'],
   },
   {
     name: 'mp3/ios',
@@ -48,6 +44,12 @@ const YTDLP_STRATEGIES = [
     args: ['--extractor-args', 'youtube:player_client=ios,mweb'],
   },
 ];
+
+function needsMp3(req) {
+  if (req.headers['x-prefer-format'] === 'mp3') return true;
+  const ua = req.headers['user-agent'] || '';
+  return /iPhone|iPad|iPod/i.test(ua);
+}
 
 const app = express();
 app.use(
@@ -129,15 +131,27 @@ async function ensureYtDlp() {
   }
 }
 
-async function findAudioFile(videoId) {
+async function findAudioFile(videoId, { mp3Only = false } = {}) {
   const mp3Path = path.join(AUDIO_DIR, `${videoId}.mp3`);
   if (existsSync(mp3Path)) return mp3Path;
+
+  if (mp3Only) return null;
 
   if (!existsSync(AUDIO_DIR)) return null;
 
   const files = await readdir(AUDIO_DIR);
   const match = files.find((f) => f.startsWith(videoId) && /\.(mp3|m4a|webm|opus)$/i.test(f));
   return match ? path.join(AUDIO_DIR, match) : null;
+}
+
+async function removeNonMp3Files(videoId) {
+  if (!existsSync(AUDIO_DIR)) return;
+  const files = await readdir(AUDIO_DIR);
+  await Promise.all(
+    files
+      .filter((f) => f.startsWith(videoId) && !f.endsWith('.mp3'))
+      .map((f) => unlink(path.join(AUDIO_DIR, f)).catch(() => {})),
+  );
 }
 
 function getJsRuntimeArgs() {
@@ -166,19 +180,15 @@ function buildYtDlpArgs(videoId, outputTemplate, cookiesPath, strategy) {
     ...strategy.args,
   ];
 
-  if (strategy.mode === 'bestaudio') {
-    args.push('-f', 'bestaudio');
-  } else {
-    args.push(
-      '-x',
-      '--audio-format',
-      'mp3',
-      '--audio-quality',
-      '5',
-      '--ffmpeg-location',
-      ffmpegPath,
-    );
-  }
+  args.push(
+    '-x',
+    '--audio-format',
+    'mp3',
+    '--audio-quality',
+    '5',
+    '--ffmpeg-location',
+    ffmpegPath,
+  );
 
   if (cookiesPath && existsSync(cookiesPath)) {
     args.push('--cookies', cookiesPath);
@@ -196,9 +206,13 @@ async function runYtDlp(videoId, strategy, cookiesPath) {
   await ytDlp.execPromise(args);
 }
 
-async function extractAudioToMp3(videoId) {
-  const existing = await findAudioFile(videoId);
+async function extractAudioToMp3(videoId, { mp3Only = false } = {}) {
+  let existing = await findAudioFile(videoId, { mp3Only });
   if (existing) return existing;
+
+  if (mp3Only) {
+    await removeNonMp3Files(videoId);
+  }
 
   await ensureYtDlp();
   await mkdir(AUDIO_DIR, { recursive: true });
@@ -210,7 +224,7 @@ async function extractAudioToMp3(videoId) {
   for (const strategy of YTDLP_STRATEGIES) {
     try {
       await runYtDlp(videoId, strategy, cookiesPath);
-      const audioPath = await findAudioFile(videoId);
+      const audioPath = await findAudioFile(videoId, { mp3Only });
       if (audioPath) {
         console.log(`Áudio pronto: ${videoId} (${path.extname(audioPath)})`);
         return audioPath;
@@ -226,14 +240,16 @@ async function extractAudioToMp3(videoId) {
   throw lastError;
 }
 
-function getOrCreateExtraction(videoId) {
-  if (!extractionJobs.has(videoId)) {
-    const job = extractAudioToMp3(videoId).finally(() => {
-      extractionJobs.delete(videoId);
+function getOrCreateExtraction(videoId, options = {}) {
+  const { mp3Only = false } = options;
+  const key = mp3Only ? `${videoId}:mp3` : videoId;
+  if (!extractionJobs.has(key)) {
+    const job = extractAudioToMp3(videoId, { mp3Only }).finally(() => {
+      extractionJobs.delete(key);
     });
-    extractionJobs.set(videoId, job);
+    extractionJobs.set(key, job);
   }
-  return extractionJobs.get(videoId);
+  return extractionJobs.get(key);
 }
 
 app.get('/api/health', (_req, res) => {
@@ -261,10 +277,12 @@ app.post('/api/extract/:videoId', async (req, res) => {
       return res.status(400).json({ error: 'URL ou ID de vídeo inválido.' });
     }
 
-    const audioPath = await getOrCreateExtraction(videoId);
+    const mp3Only = needsMp3(req);
+    const audioPath = await getOrCreateExtraction(videoId, { mp3Only });
     res.json({
       videoId,
       audioUrl: `/api/audio/${videoId}`,
+      format: 'mp3',
       ready: true,
     });
   } catch (err) {
@@ -281,12 +299,22 @@ app.get('/api/audio/:videoId', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido.' });
   }
 
-  const filePath = await findAudioFile(videoId);
+  const mp3Only = needsMp3(req);
+  let filePath = await findAudioFile(videoId, { mp3Only });
+
+  if (!filePath && mp3Only) {
+    filePath = await getOrCreateExtraction(videoId, { mp3Only });
+  }
+
   if (!filePath) {
     return res.status(404).json({ error: 'Áudio ainda não disponível para processamento.' });
   }
 
   const ext = path.extname(filePath).toLowerCase();
+
+  if (mp3Only && ext !== '.mp3') {
+    return res.status(415).json({ error: 'Formato de áudio incompatível com este dispositivo.' });
+  }
   const mime =
     ext === '.mp3' ? 'audio/mpeg' : ext === '.webm' ? 'audio/webm' : 'audio/mp4';
 

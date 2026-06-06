@@ -1,5 +1,6 @@
 import { SoundTouchNode } from '@soundtouchjs/audio-worklet';
 import processorUrl from '@soundtouchjs/audio-worklet/processor?url';
+import { isIOS } from './utils.js';
 
 /**
  * Reproduz áudio com pitch em tempo real via Web Audio + SoundTouch.
@@ -14,6 +15,7 @@ export class AudioPitchController {
     this.semitones = 0;
     this.isReady = false;
     this._registerPromise = null;
+    this._blobUrl = null;
   }
 
   async init() {
@@ -30,6 +32,8 @@ export class AudioPitchController {
     this.audioElement.preload = 'auto';
     this.audioElement.crossOrigin = 'anonymous';
     this.audioElement.preservesPitch = false;
+    this.audioElement.setAttribute('playsinline', '');
+    this.audioElement.setAttribute('webkit-playsinline', '');
 
     this.pitchNode = new SoundTouchNode({ context: this.audioContext });
     this.gainNode = this.audioContext.createGain();
@@ -44,6 +48,30 @@ export class AudioPitchController {
     this.setPitch(0);
   }
 
+  _revokeBlob() {
+    if (this._blobUrl) {
+      URL.revokeObjectURL(this._blobUrl);
+      this._blobUrl = null;
+    }
+  }
+
+  async _resolveAudioSrc(audioUrl) {
+    if (!isIOS()) {
+      return audioUrl;
+    }
+
+    const res = await fetch(audioUrl);
+    if (!res.ok) {
+      throw new Error('Erro ao carregar o arquivo de áudio.');
+    }
+
+    const blob = await res.blob();
+    const type = res.headers.get('content-type') || 'audio/mpeg';
+    this._revokeBlob();
+    this._blobUrl = URL.createObjectURL(new Blob([blob], { type }));
+    return this._blobUrl;
+  }
+
   /**
    * @param {string} audioUrl
    */
@@ -51,29 +79,40 @@ export class AudioPitchController {
     await this.init();
     this.stop();
 
-    this.audioElement.src = audioUrl;
+    const src = await this._resolveAudioSrc(audioUrl);
+    this.audioElement.src = src;
 
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error('Tempo esgotado ao carregar o áudio.'));
-      }, 120000);
+      }, isIOS() ? 180000 : 120000);
 
+      let settled = false;
       const onReady = () => {
+        if (settled) return;
+        settled = true;
         cleanup();
         resolve();
       };
       const onError = () => {
+        if (settled) return;
+        settled = true;
         cleanup();
         reject(new Error('Erro ao carregar o arquivo de áudio.'));
       };
       const cleanup = () => {
         clearTimeout(timeout);
-        this.audioElement.removeEventListener('canplaythrough', onReady);
+        for (const ev of readyEvents) {
+          this.audioElement.removeEventListener(ev, onReady);
+        }
         this.audioElement.removeEventListener('error', onError);
       };
 
-      this.audioElement.addEventListener('canplaythrough', onReady, { once: true });
+      const readyEvents = ['loadedmetadata', 'canplay', 'canplaythrough'];
+      for (const ev of readyEvents) {
+        this.audioElement.addEventListener(ev, onReady, { once: true });
+      }
       this.audioElement.addEventListener('error', onError, { once: true });
       this.audioElement.load();
     });
@@ -93,8 +132,6 @@ export class AudioPitchController {
     if (!this.pitchNode || !this.audioContext) return;
 
     const time = this.audioContext.currentTime;
-
-    // Usar apenas pitchSemitones; pitch=1 evita compensação dupla (doc SoundTouch)
     this.pitchNode.pitch.setValueAtTime(1, time);
     this.pitchNode.pitchSemitones.setValueAtTime(semitones, time);
     this.pitchNode.playbackRate.setValueAtTime(1, time);
@@ -142,6 +179,7 @@ export class AudioPitchController {
     this.audioElement.pause();
     this.audioElement.removeAttribute('src');
     this.audioElement.load();
+    this._revokeBlob();
     this.isReady = false;
   }
 
