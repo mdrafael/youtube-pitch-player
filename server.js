@@ -12,9 +12,9 @@ const YTDlpWrap = ytDlpModule.default ?? ytDlpModule;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const NODE_BIN = process.execPath;
-const DENO_BIN =
-  process.env.DENO_INSTALL?.replace(/\/$/, '') + '/bin/deno' ||
-  path.join(process.env.HOME || '', '.deno', 'bin', 'deno');
+const DENO_BIN = process.env.DENO_INSTALL
+  ? path.join(process.env.DENO_INSTALL.replace(/\/$/, ''), 'bin', 'deno')
+  : path.join(process.env.HOME || '', '.deno', 'bin', 'deno');
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
   : ['http://localhost:5173', 'http://localhost:4173'];
