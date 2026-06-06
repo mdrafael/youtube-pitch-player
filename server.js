@@ -12,6 +12,9 @@ const YTDlpWrap = ytDlpModule.default ?? ytDlpModule;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const NODE_BIN = process.execPath;
+const DENO_BIN =
+  process.env.DENO_INSTALL?.replace(/\/$/, '') + '/bin/deno' ||
+  path.join(process.env.HOME || '', '.deno', 'bin', 'deno');
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
   : ['http://localhost:5173', 'http://localhost:4173'];
@@ -137,6 +140,13 @@ async function findAudioFile(videoId) {
   return match ? path.join(AUDIO_DIR, match) : null;
 }
 
+function getJsRuntimeArgs() {
+  if (existsSync(DENO_BIN)) {
+    return ['--js-runtimes', `deno:${DENO_BIN}`];
+  }
+  return ['--js-runtimes', `node:${NODE_BIN}`];
+}
+
 function buildYtDlpArgs(videoId, outputTemplate, cookiesPath, strategy) {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   const args = [
@@ -150,8 +160,7 @@ function buildYtDlpArgs(videoId, outputTemplate, cookiesPath, strategy) {
     USER_AGENT,
     '--retries',
     '3',
-    '--js-runtimes',
-    `node:${NODE_BIN}`,
+    ...getJsRuntimeArgs(),
     '--remote-components',
     'ejs:github',
     ...strategy.args,
