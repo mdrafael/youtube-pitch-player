@@ -52,38 +52,9 @@ async function resolveFromServer(videoId) {
   return { streamUrl: data.streamUrl, mimeType: data.mimeType || 'audio/mp4' };
 }
 
-async function resolveWithYoutubei(videoId) {
-  const { Innertube } = await import('youtubei.js/web');
-  const innertube = await Innertube.create();
-
-  for (const client of ['ANDROID', 'IOS', 'MWEB', 'TV_EMBEDDED']) {
-    try {
-      const info = await innertube.getBasicInfo(videoId, { client });
-      if (info.playability_status?.status !== 'OK') continue;
-
-      const format =
-        info.chooseFormat({ type: 'audio', quality: 'best', format: 'mp4' }) ||
-        info.chooseFormat({ type: 'audio', quality: 'best' });
-
-      if (!format) continue;
-
-      let streamUrl = format.url;
-      if (!streamUrl) {
-        streamUrl = await format.decipher(innertube.session.player);
-      }
-
-      if (streamUrl) {
-        return { streamUrl, mimeType: format.mime_type || 'audio/mp4' };
-      }
-    } catch {
-      /* próximo */
-    }
-  }
-
-  return null;
-}
-
 export async function resolveStream(videoId) {
+  const serverPromise = resolveFromServer(videoId).catch(() => null);
+
   for (const client of CLIENTS) {
     try {
       const result = await tryDirectInnertube(videoId, client);
@@ -93,19 +64,8 @@ export async function resolveStream(videoId) {
     }
   }
 
-  try {
-    const server = await resolveFromServer(videoId);
-    if (server) return server;
-  } catch {
-    /* continua */
-  }
-
-  try {
-    const yt = await resolveWithYoutubei(videoId);
-    if (yt) return yt;
-  } catch {
-    /* continua */
-  }
+  const server = await serverPromise;
+  if (server) return server;
 
   throw new Error(
     'Não foi possível obter o áudio. Tente outro vídeo ou aguarde alguns segundos e recarregue a página.',

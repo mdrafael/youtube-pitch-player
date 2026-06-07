@@ -1,6 +1,5 @@
 import { SoundTouchNode } from '@soundtouchjs/audio-worklet';
 import processorUrl from '@soundtouchjs/audio-worklet/processor?url';
-import { isIOS } from './utils.js';
 
 /**
  * Áudio com pitch em tempo real — Web Audio + SoundTouch.
@@ -15,7 +14,6 @@ export class AudioPitchController {
     this.semitones = 0;
     this.isReady = false;
     this._registerPromise = null;
-    this._blobUrl = null;
   }
 
   async init() {
@@ -48,38 +46,17 @@ export class AudioPitchController {
     this.setPitch(0);
   }
 
-  _revokeBlob() {
-    if (this._blobUrl) {
-      URL.revokeObjectURL(this._blobUrl);
-      this._blobUrl = null;
-    }
-  }
-
-  async _resolveAudioSrc(audioUrl) {
-    if (!isIOS()) return audioUrl;
-
-    const res = await fetch(audioUrl);
-    if (!res.ok) throw new Error('Erro ao carregar o áudio.');
-
-    const blob = await res.blob();
-    const type = res.headers.get('content-type') || 'audio/mp4';
-    this._revokeBlob();
-    this._blobUrl = URL.createObjectURL(new Blob([blob], { type }));
-    return this._blobUrl;
-  }
-
   async load(audioUrl) {
     await this.init();
     this.stop();
 
-    const src = await this._resolveAudioSrc(audioUrl);
-    this.audioElement.src = src;
+    this.audioElement.src = audioUrl;
 
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error('Tempo esgotado ao carregar o áudio.'));
-      }, isIOS() ? 180000 : 90000);
+      }, 90000);
 
       let settled = false;
       const onReady = () => {
@@ -162,7 +139,6 @@ export class AudioPitchController {
     this.audioElement.pause();
     this.audioElement.removeAttribute('src');
     this.audioElement.load();
-    this._revokeBlob();
     this.isReady = false;
   }
 

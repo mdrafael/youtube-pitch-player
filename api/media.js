@@ -1,20 +1,17 @@
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-
-const ALLOWED = ['googlevideo.com', 'youtube.com', 'googleusercontent.com'];
-
-function isAllowed(raw) {
-  try {
-    const host = new URL(raw).hostname.toLowerCase();
-    return ALLOWED.some((d) => host === d || host.endsWith(`.${d}`));
-  } catch {
-    return false;
-  }
-}
+import { isAllowedUrl, open } from './lib/media-token.js';
 
 export default async function handler(req, res) {
-  const target = req.query?.u;
-  if (!target || typeof target !== 'string' || !isAllowed(target)) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  let target = req.query?.u;
+
+  if (req.query?.t) {
+    target = open(String(req.query.t));
+  }
+
+  if (!target || typeof target !== 'string' || !isAllowedUrl(target)) {
     res.status(400).json({ error: 'URL inválida.' });
     return;
   }
@@ -32,7 +29,6 @@ export default async function handler(req, res) {
     const upstream = await fetch(target, { headers, redirect: 'follow' });
 
     res.status(upstream.status);
-    res.setHeader('Access-Control-Allow-Origin', '*');
 
     for (const name of ['content-type', 'content-length', 'accept-ranges', 'content-range']) {
       const value = upstream.headers.get(name);

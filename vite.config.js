@@ -31,9 +31,42 @@ function devApiPlugin() {
   return {
     name: 'dev-api',
     configureServer(server) {
+      server.middlewares.use('/api/session', async (req, res) => {
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+        try {
+          const { default: handler } = await import('./api/session.js');
+          let body = '';
+          req.on('data', (chunk) => { body += chunk; });
+          req.on('end', async () => {
+            await handler(
+              { method: req.method, body: body ? JSON.parse(body) : {}, headers: req.headers },
+              {
+                status(code) { res.statusCode = code; return this; },
+                json(data) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); },
+                setHeader(k, v) { res.setHeader(k, v); },
+                end() { res.end(); },
+              },
+            );
+          });
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+
       server.middlewares.use('/api/media', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
-        const target = url.searchParams.get('u');
+        let target = url.searchParams.get('u');
+
+        if (url.searchParams.get('t')) {
+          const { open } = await import('./api/lib/media-token.js');
+          target = open(url.searchParams.get('t'));
+        }
+
         if (!target || !isAllowedUrl(target)) {
           res.statusCode = 400;
           res.end('URL inválida');
@@ -51,7 +84,7 @@ function devApiPlugin() {
         const url = new URL(req.url, 'http://localhost');
         const id = url.searchParams.get('id');
         try {
-          const { default: handler } = await import('../api/resolve.js');
+          const { default: handler } = await import('./api/resolve.js');
           await handler({ query: { id }, headers: {} }, {
             status(code) { res.statusCode = code; return this; },
             json(data) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); },

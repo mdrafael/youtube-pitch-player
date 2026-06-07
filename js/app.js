@@ -3,6 +3,7 @@ import { YouTubePlayerController } from './youtube-player.js';
 import { AudioPitchController } from './audio-pitch.js';
 import { mediaProxyUrl } from './media.js';
 import { resolveStream } from './youtube-stream.js';
+import { cleanupLegacyServiceWorker } from './sw-cleanup.js';
 
 const YT_PLAYING = 1;
 const YT_PAUSED = 2;
@@ -120,7 +121,7 @@ async function prepareAudio(videoId) {
   setProgress(true, 70);
   setStatus('Preparando processamento de tom...', 'info');
 
-  return mediaProxyUrl(streamUrl);
+  return await mediaProxyUrl(streamUrl);
 }
 
 async function loadVideo(url) {
@@ -192,3 +193,5 @@ resetPitchBtn.addEventListener('click', () => {
 pitchSlider.disabled = true;
 resetPitchBtn.disabled = true;
 updatePitchDisplay(0);
+
+cleanupLegacyServiceWorker();
