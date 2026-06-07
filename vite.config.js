@@ -11,39 +11,55 @@ function isAllowedUrl(raw) {
   }
 }
 
-/** Proxy /yt-media em dev (em produção o Service Worker faz isso). */
-function ytMediaDevProxy() {
+async function proxyMedia(target, req, res) {
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  };
+  if (req.headers.range) headers.Range = req.headers.range;
+
+  const upstream = await fetch(target, { headers, redirect: 'follow' });
+  res.statusCode = upstream.status;
+  for (const name of ['content-type', 'content-length', 'accept-ranges', 'content-range']) {
+    const value = upstream.headers.get(name);
+    if (value) res.setHeader(name, value);
+  }
+  res.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
+function devApiPlugin() {
   return {
-    name: 'yt-media-dev-proxy',
+    name: 'dev-api',
     configureServer(server) {
-      server.middlewares.use('/yt-media', async (req, res) => {
+      server.middlewares.use('/api/media', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         const target = url.searchParams.get('u');
-
         if (!target || !isAllowedUrl(target)) {
           res.statusCode = 400;
           res.end('URL inválida');
           return;
         }
-
-        const headers = {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        };
-        if (req.headers.range) headers.Range = req.headers.range;
-
         try {
-          const upstream = await fetch(target, { headers, redirect: 'follow' });
-          res.statusCode = upstream.status;
-          for (const name of ['content-type', 'content-length', 'accept-ranges', 'content-range']) {
-            const value = upstream.headers.get(name);
-            if (value) res.setHeader(name, value);
-          }
-          const buf = Buffer.from(await upstream.arrayBuffer());
-          res.end(buf);
+          await proxyMedia(target, req, res);
         } catch (err) {
           res.statusCode = 502;
           res.end(err.message);
+        }
+      });
+
+      server.middlewares.use('/api/resolve', async (req, res) => {
+        const url = new URL(req.url, 'http://localhost');
+        const id = url.searchParams.get('id');
+        try {
+          const { default: handler } = await import('../api/resolve.js');
+          await handler({ query: { id }, headers: {} }, {
+            status(code) { res.statusCode = code; return this; },
+            json(data) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); },
+            setHeader(k, v) { res.setHeader(k, v); },
+          });
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err.message }));
         }
       });
     },
@@ -52,7 +68,7 @@ function ytMediaDevProxy() {
 
 export default defineConfig({
   root: '.',
-  plugins: [ytMediaDevProxy()],
+  plugins: [devApiPlugin()],
   optimizeDeps: {
     include: ['@soundtouchjs/audio-worklet'],
   },

@@ -1,7 +1,7 @@
 import { extractVideoId, formatPitch } from './utils.js';
 import { YouTubePlayerController } from './youtube-player.js';
 import { AudioPitchController } from './audio-pitch.js';
-import { ensureServiceWorker, mediaProxyUrl } from './sw-register.js';
+import { mediaProxyUrl } from './media.js';
 import { resolveStream } from './youtube-stream.js';
 
 const YT_PLAYING = 1;
@@ -28,7 +28,6 @@ const audioPitch = new AudioPitchController();
 let currentVideoId = null;
 let syncInterval = null;
 let isLoading = false;
-let swReady = false;
 
 function getPitchSemitones() {
   return parseFloat(pitchSlider.value) || 0;
@@ -112,16 +111,9 @@ youtubePlayer.onStateChange = async (state) => {
   }
 };
 
-async function ensureReady() {
-  if (!swReady) {
-    await ensureServiceWorker();
-    swReady = true;
-  }
-}
-
 async function prepareAudio(videoId) {
   setProgress(true, 25);
-  setStatus('Localizando áudio no seu dispositivo...', 'info');
+  setStatus('Localizando áudio...', 'info');
 
   const { streamUrl } = await resolveStream(videoId);
 
@@ -143,8 +135,6 @@ async function loadVideo(url) {
   setProgress(true, 5);
 
   try {
-    await ensureReady();
-
     if (currentVideoId !== videoId) {
       stopSync();
       audioPitch.stop();
@@ -165,14 +155,15 @@ async function loadVideo(url) {
     }
 
     setStatus(
-      'Pronto! Reproduza o vídeo e ajuste o tom com o slider — tudo roda no seu dispositivo.',
+      'Pronto! Reproduza o vídeo e ajuste o tom com o slider.',
       'success',
     );
   } catch (err) {
     console.error(err);
-    const msg = err?.message === 'Failed to fetch'
-      ? 'Falha de rede. Verifique sua conexão e tente de novo.'
-      : err?.message || 'Erro ao carregar.';
+    const msg =
+      err?.message === 'Failed to fetch'
+        ? 'Falha de rede. Verifique sua conexão e tente de novo.'
+        : err?.message || 'Erro ao carregar.';
     setStatus(msg, 'error');
   } finally {
     setLoading(false);
@@ -201,11 +192,3 @@ resetPitchBtn.addEventListener('click', () => {
 pitchSlider.disabled = true;
 resetPitchBtn.disabled = true;
 updatePitchDisplay(0);
-
-ensureServiceWorker()
-  .then(() => {
-    swReady = true;
-  })
-  .catch((err) => {
-    setStatus(err.message, 'error');
-  });
