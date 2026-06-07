@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { extractVideoId, resolveAudioStream } from './lib/resolve-audio.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -57,9 +58,24 @@ function purgeExpiredSessions() {
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
-    mode: 'stream-proxy',
+    mode: 'resolve-proxy',
     cookiesRequired: false,
   });
+});
+
+app.get('/api/resolve/:videoId', async (req, res) => {
+  const videoId = extractVideoId(req.params.videoId);
+  if (!videoId) {
+    return res.status(400).json({ error: 'URL ou ID de vídeo inválido.' });
+  }
+
+  try {
+    const result = await resolveAudioStream(videoId);
+    res.json(result);
+  } catch (err) {
+    console.error(`Resolve ${videoId}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/proxy/session', (req, res) => {
@@ -138,5 +154,5 @@ app.get('/api/proxy/stream/:id', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Proxy de stream: http://localhost:${PORT}`);
+  console.log(`Servidor: http://localhost:${PORT}`);
 });

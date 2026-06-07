@@ -2,7 +2,6 @@ import { extractVideoId, formatPitch } from './utils.js';
 import { YouTubePlayerController } from './youtube-player.js';
 import { AudioPitchController } from './audio-pitch.js';
 import { apiUrl } from './config.js';
-import { resolveAudioStream } from './youtube-audio-resolver.js';
 
 const YT_PLAYING = 1;
 const YT_PAUSED = 2;
@@ -136,19 +135,28 @@ async function createProxyUrl(streamUrl) {
   return apiUrl(data.proxyUrl);
 }
 
+function friendlyError(err) {
+  const msg = err?.message || '';
+  if (msg === 'Failed to fetch') {
+    return 'Falha de conexão com o servidor. O Render pode estar iniciando — aguarde ~30s e tente de novo.';
+  }
+  return msg || 'Erro ao carregar.';
+}
+
 async function prepareAudio(videoId) {
   setProgress(true, 20);
-  setStatus('Localizando áudio do vídeo no seu navegador...', 'info');
+  setStatus('Localizando áudio do vídeo...', 'info');
 
-  const { streamUrl } = await resolveAudioStream(videoId);
+  const res = await fetch(apiUrl(`/api/resolve/${videoId}`));
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Não foi possível preparar o áudio do vídeo.');
+  }
+
+  const { streamUrl } = await res.json();
 
   setProgress(true, 55);
   setStatus('Preparando reprodução com processamento de tom...', 'info');
-
-  const proxyOk = await checkProxy();
-  if (!proxyOk) {
-    throw new Error('Serviço de áudio indisponível no momento. Tente novamente em instantes.');
-  }
 
   const audioUrl = await createProxyUrl(streamUrl);
 
@@ -195,7 +203,7 @@ async function loadVideo(url) {
     );
   } catch (err) {
     console.error(err);
-    setStatus(err.message || 'Erro ao carregar.', 'error');
+    setStatus(friendlyError(err), 'error');
   } finally {
     setLoading(false);
     setTimeout(() => setProgress(false), 600);
