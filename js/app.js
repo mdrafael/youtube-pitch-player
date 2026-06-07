@@ -2,6 +2,7 @@ import { extractVideoId, formatPitch } from './utils.js';
 import { YouTubePlayerController } from './youtube-player.js';
 import { AudioPitchController } from './audio-pitch.js';
 import { apiUrl } from './config.js';
+import { resolveInBrowser } from './innertube-browser.js';
 
 const YT_PLAYING = 1;
 const YT_PAUSED = 2;
@@ -140,20 +141,44 @@ function friendlyError(err) {
   if (msg === 'Failed to fetch') {
     return 'Falha de conexão com o servidor. O Render pode estar iniciando — aguarde ~30s e tente de novo.';
   }
+  if (msg === 'browser-failed') {
+    return 'O YouTube não liberou o áudio deste vídeo (comum em clipes musicais ou com restrição regional). Teste o link em aba anônima ou use outro vídeo.';
+  }
   return msg || 'Erro ao carregar.';
+}
+
+async function resolveStreamUrl(videoId) {
+  let serverError = '';
+
+  try {
+    const res = await fetch(apiUrl(`/api/resolve/${videoId}`));
+    if (res.ok) {
+      const data = await res.json();
+      return data.streamUrl;
+    }
+    const data = await res.json().catch(() => ({}));
+    serverError = data.error || '';
+  } catch {
+    /* tenta fallback no navegador */
+  }
+
+  setProgress(true, 35);
+  setStatus('Tentando localizar áudio pelo seu navegador...', 'info');
+
+  try {
+    const { streamUrl } = await resolveInBrowser(videoId);
+    return streamUrl;
+  } catch {
+    if (serverError) throw new Error(serverError);
+    throw new Error('browser-failed');
+  }
 }
 
 async function prepareAudio(videoId) {
   setProgress(true, 20);
   setStatus('Localizando áudio do vídeo...', 'info');
 
-  const res = await fetch(apiUrl(`/api/resolve/${videoId}`));
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Não foi possível preparar o áudio do vídeo.');
-  }
-
-  const { streamUrl } = await res.json();
+  const streamUrl = await resolveStreamUrl(videoId);
 
   setProgress(true, 55);
   setStatus('Preparando reprodução com processamento de tom...', 'info');
@@ -180,11 +205,11 @@ async function loadVideo(url) {
       stopSync();
       audioPitch.stop();
 
-      const audioUrl = await prepareAudio(videoId);
-
-      setStatus('Carregando player...', 'info');
       playerSection.hidden = false;
       pitchPanel.hidden = false;
+      setStatus('Carregando vídeo e áudio...', 'info');
+
+      const audioUrl = await prepareAudio(videoId);
 
       await youtubePlayer.load(videoId);
       youtubePlayer.enforceMute();

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { extractVideoId, resolveAudioStream } from './lib/resolve-audio.js';
+import { buildAudioError, extractVideoId, resolveAudioStream } from './lib/resolve-audio.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -74,7 +74,10 @@ app.get('/api/resolve/:videoId', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error(`Resolve ${videoId}:`, err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message || buildAudioError(err.reason),
+      reason: err.reason || '',
+    });
   }
 });
 
