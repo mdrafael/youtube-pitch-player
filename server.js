@@ -257,7 +257,11 @@ function getOrCreateExtraction(videoId, options = {}) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, node: NODE_BIN });
+  res.json({
+    ok: true,
+    node: NODE_BIN,
+    cookiesConfigured: !!process.env.YOUTUBE_COOKIES?.trim(),
+  });
 });
 
 app.get('/api/status/:videoId', async (req, res) => {
