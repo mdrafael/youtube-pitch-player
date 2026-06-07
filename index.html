@@ -44,6 +44,14 @@
 
           <progress id="progress-bar" class="progress-bar" max="100" value="0" hidden></progress>
           <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
+
+          <div id="capture-panel" class="capture-panel" hidden>
+            <p class="capture-hint">
+              A extração automática falhou. Clique abaixo, selecione <strong>esta aba</strong> e marque
+              <strong>“Compartilhar áudio da aba”</strong> — funciona com qualquer vídeo que toca no player.
+            </p>
+            <button type="button" id="capture-btn" class="btn btn-secondary">Capturar áudio da aba</button>
+          </div>
         </section>
 
         <section id="player-section" class="player-section" hidden>

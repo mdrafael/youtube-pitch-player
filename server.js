@@ -59,7 +59,7 @@ function purgeExpiredSessions() {
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
-    mode: 'resolve-proxy',
+    mode: 'multi-resolve',
     cookiesRequired: false,
   });
 });
@@ -82,13 +82,51 @@ app.get('/api/resolve/:videoId', async (req, res) => {
 
   try {
     const result = await resolveAudioStream(videoId);
-    res.json(result);
+
+    if (result.audioPath) {
+      return res.json({
+        videoId,
+        audioUrl: `/api/audio/${videoId}`,
+        format: 'mp3',
+        source: result.source,
+        ready: true,
+      });
+    }
+
+    res.json({
+      streamUrl: result.streamUrl,
+      mimeType: result.mimeType,
+      source: result.source,
+    });
   } catch (err) {
     console.error(`Resolve ${videoId}:`, err.message);
     res.status(500).json({
       error: err.message || buildAudioError(err.reason),
       reason: err.reason || '',
+      captureFallback: true,
     });
+  }
+});
+
+app.get('/api/audio/:videoId', async (req, res) => {
+  const videoId = extractVideoId(req.params.videoId);
+  if (!videoId) {
+    return res.status(400).json({ error: 'ID inválido.' });
+  }
+
+  try {
+    const result = await resolveAudioStream(videoId);
+    if (!result.audioPath) {
+      return res.status(404).json({ error: 'Áudio não disponível.' });
+    }
+
+    setCorsOrigin(req, res);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(result.audioPath);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

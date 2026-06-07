@@ -21,6 +21,8 @@ const pitchPanel = document.getElementById('pitch-panel');
 const pitchSlider = document.getElementById('pitch-slider');
 const pitchValue = document.getElementById('pitch-value');
 const resetPitchBtn = document.getElementById('reset-pitch-btn');
+const capturePanel = document.getElementById('capture-panel');
+const captureBtn = document.getElementById('capture-btn');
 
 const youtubePlayer = new YouTubePlayerController('youtube-player');
 const audioPitch = new AudioPitchController();
@@ -28,6 +30,7 @@ const audioPitch = new AudioPitchController();
 let currentVideoId = null;
 let syncInterval = null;
 let isLoading = false;
+let usingCapture = false;
 
 function getPitchSemitones() {
   return parseFloat(pitchSlider.value) || 0;
@@ -48,13 +51,19 @@ function setLoading(loading) {
   loadBtn.disabled = loading;
   btnText.hidden = loading;
   btnSpinner.hidden = !loading;
-  pitchSlider.disabled = loading;
-  resetPitchBtn.disabled = loading;
+  if (loading) {
+    pitchSlider.disabled = true;
+    resetPitchBtn.disabled = true;
+  }
 }
 
 function updatePitchDisplay(semitones) {
   pitchValue.textContent = formatPitch(semitones);
   pitchSlider.value = String(semitones);
+}
+
+function showCaptureFallback(show) {
+  capturePanel.hidden = !show;
 }
 
 function stopSync() {
@@ -65,6 +74,7 @@ function stopSync() {
 }
 
 function startSync() {
+  if (usingCapture) return;
   stopSync();
   syncInterval = setInterval(() => {
     if (!currentVideoId) return;
@@ -78,10 +88,11 @@ function startSync() {
 
 async function syncAudioToVideo(play = false) {
   const time = youtubePlayer.getCurrentTime();
-  audioPitch.seek(time);
+  if (!usingCapture) audioPitch.seek(time);
   audioPitch.setPitch(getPitchSemitones());
   if (play) {
-    await audioPitch.play();
+    if (usingCapture) await audioPitch.unpause();
+    else await audioPitch.play();
     startSync();
   }
 }
@@ -98,27 +109,18 @@ youtubePlayer.onStateChange = async (state) => {
       stopSync();
       break;
     case YT_BUFFERING:
-      audioPitch.seek(youtubePlayer.getCurrentTime());
+      if (!usingCapture) audioPitch.seek(youtubePlayer.getCurrentTime());
       audioPitch.pause();
       break;
     case YT_ENDED:
       audioPitch.pause();
-      audioPitch.seek(0);
+      if (!usingCapture) audioPitch.seek(0);
       stopSync();
       break;
     default:
       break;
   }
 };
-
-async function checkProxy() {
-  try {
-    const res = await fetch(apiUrl('/api/health'));
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
 
 async function createProxyUrl(streamUrl) {
   const res = await fetch(apiUrl('/api/proxy/session'), {
@@ -139,64 +141,56 @@ async function createProxyUrl(streamUrl) {
 function friendlyError(err) {
   const msg = err?.message || '';
   if (msg === 'Failed to fetch') {
-    return 'Falha de conexão com o servidor. O Render pode estar iniciando — aguarde ~30s e tente de novo.';
-  }
-  if (msg === 'browser-failed') {
-    return 'O YouTube não liberou o áudio deste vídeo (comum em clipes musicais ou com restrição regional). Teste o link em aba anônima ou use outro vídeo.';
+    return 'Falha de conexão com o servidor. Aguarde ~30s e tente de novo.';
   }
   return msg || 'Erro ao carregar.';
 }
 
-async function resolveStreamUrl(videoId) {
-  let serverError = '';
-
-  try {
-    const res = await fetch(apiUrl(`/api/resolve/${videoId}`));
-    if (res.ok) {
-      const data = await res.json();
-      return data.streamUrl;
-    }
-    const data = await res.json().catch(() => ({}));
-    serverError = data.error || '';
-  } catch {
-    /* tenta fallback no navegador */
-  }
-
-  setProgress(true, 35);
-  setStatus('Tentando localizar áudio pelo seu navegador...', 'info');
+async function resolveAudioUrl(videoId) {
+  setProgress(true, 15);
+  setStatus('Buscando áudio (navegador)...', 'info');
 
   try {
     const { streamUrl } = await resolveInBrowser(videoId);
-    return streamUrl;
+    setProgress(true, 45);
+    setStatus('Preparando stream...', 'info');
+    return await createProxyUrl(streamUrl);
   } catch {
-    if (serverError) throw new Error(serverError);
-    throw new Error('browser-failed');
+    /* continua no servidor */
   }
+
+  setProgress(true, 30);
+  setStatus('Buscando áudio (servidor)...', 'info');
+
+  const res = await fetch(apiUrl(`/api/resolve/${videoId}`));
+  const data = await res.json().catch(() => ({}));
+
+  if (res.ok) {
+    if (data.audioUrl) return apiUrl(data.audioUrl);
+    if (data.streamUrl) return createProxyUrl(data.streamUrl);
+  }
+
+  const err = new Error(data.error || 'Não foi possível extrair o áudio.');
+  err.captureFallback = data.captureFallback !== false;
+  throw err;
 }
 
-async function prepareAudio(videoId) {
-  setProgress(true, 20);
-  setStatus('Localizando áudio do vídeo...', 'info');
+async function enableCaptureMode() {
+  usingCapture = true;
+  showCaptureFallback(false);
+  setStatus('Selecione esta aba e marque "Compartilhar áudio da aba"...', 'info');
 
-  const streamUrl = await resolveStreamUrl(videoId);
+  youtubePlayer.unmute();
 
-  setProgress(true, 55);
-  setStatus('Preparando reprodução com processamento de tom...', 'info');
+  await audioPitch.loadFromTabCapture();
+  audioPitch.setPitch(getPitchSemitones());
+  pitchSlider.disabled = false;
+  resetPitchBtn.disabled = false;
 
-  const audioUrl = await createProxyUrl(streamUrl);
-
-  setProgress(true, 100);
-  return audioUrl;
-}
-
-async function checkVideo(videoId) {
-  try {
-    const res = await fetch(apiUrl(`/api/check/${videoId}`));
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+  setStatus(
+    'Captura ativa! Reproduza o vídeo e ajuste o tom. O áudio original da aba será processado em tempo real.',
+    'success',
+  );
 }
 
 async function loadVideo(url) {
@@ -209,51 +203,46 @@ async function loadVideo(url) {
 
   setLoading(true);
   setProgress(true, 5);
+  showCaptureFallback(false);
+  usingCapture = false;
 
   try {
     if (currentVideoId !== videoId) {
       stopSync();
       audioPitch.stop();
 
-      const embedCheck = await checkVideo(videoId);
-      if (embedCheck && !embedCheck.ok) {
-        throw new Error(embedCheck.message);
-      }
-
       playerSection.hidden = false;
       pitchPanel.hidden = false;
       setStatus('Carregando vídeo...', 'info');
 
-      const playerReady = youtubePlayer.load(videoId).then(() => youtubePlayer.enforceMute());
+      const playerReady = youtubePlayer.load(videoId);
 
-      let audioOk = true;
       try {
-        const audioUrl = await prepareAudio(videoId);
+        const audioUrl = await resolveAudioUrl(videoId);
         await playerReady;
+        youtubePlayer.enforceMute();
+
         await audioPitch.load(audioUrl);
         audioPitch.setPitch(getPitchSemitones());
         pitchSlider.disabled = false;
         resetPitchBtn.disabled = false;
+
+        setStatus(
+          'Pronto! Reproduza o vídeo e ajuste o tom com o slider — o áudio é processado em tempo real.',
+          'success',
+        );
       } catch (audioErr) {
-        audioOk = false;
         await playerReady;
         pitchSlider.disabled = true;
         resetPitchBtn.disabled = true;
-        console.error(audioErr);
+        showCaptureFallback(true);
         setStatus(
-          `${friendlyError(audioErr)} O vídeo foi carregado abaixo, mas o controle de tom não funciona neste link.`,
+          `${friendlyError(audioErr)} Use o botão abaixo para capturar o áudio da aba — funciona com qualquer vídeo que toca aqui.`,
           'error',
         );
       }
 
       currentVideoId = videoId;
-
-      if (audioOk) {
-        setStatus(
-          'Pronto! Reproduza o vídeo e ajuste o tom com o slider — o áudio é processado em tempo real.',
-          'success',
-        );
-      }
     }
   } catch (err) {
     console.error(err);
@@ -268,6 +257,20 @@ form.addEventListener('submit', (e) => {
   e.preventDefault();
   if (isLoading) return;
   loadVideo(urlInput.value);
+});
+
+captureBtn.addEventListener('click', async () => {
+  if (isLoading) return;
+  setLoading(true);
+  try {
+    await enableCaptureMode();
+  } catch (err) {
+    console.error(err);
+    setStatus(friendlyError(err), 'error');
+    showCaptureFallback(true);
+  } finally {
+    setLoading(false);
+  }
 });
 
 pitchSlider.addEventListener('input', async () => {
@@ -286,7 +289,4 @@ resetPitchBtn.addEventListener('click', () => {
 pitchSlider.disabled = true;
 resetPitchBtn.disabled = true;
 updatePitchDisplay(0);
-
-checkProxy().then((ok) => {
-  if (!ok) setStatus('Aguardando conexão com o serviço de áudio...', 'info');
-});
+showCaptureFallback(false);

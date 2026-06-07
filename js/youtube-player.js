@@ -31,6 +31,16 @@ export class YouTubePlayerController {
     }
   }
 
+  unmute() {
+    if (!this.player) return;
+    try {
+      this.player.unMute?.();
+      this.player.setVolume?.(100);
+    } catch {
+      /* ignore */
+    }
+  }
+
   async load(videoId) {
     await YouTubePlayerController.waitForAPI();
 
