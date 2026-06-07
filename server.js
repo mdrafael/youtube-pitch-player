@@ -294,9 +294,12 @@ app.post('/api/extract/:videoId', async (req, res) => {
     });
   } catch (err) {
     console.error('Erro no processamento:', err.message);
-    res.status(500).json({
-      error: err.userMessage || toUserError(err, !!process.env.YOUTUBE_COOKIES),
-    });
+    let message = err.userMessage || toUserError(err, !!process.env.YOUTUBE_COOKIES);
+    if (process.env.YOUTUBE_COOKIES?.trim() && message.includes('Tente novamente')) {
+      message =
+        'Falha ao processar o áudio. Os cookies do YouTube no Render provavelmente expiraram — exporte novamente no Chrome e atualize YOUTUBE_COOKIES.';
+    }
+    res.status(500).json({ error: message });
   }
 });
 
