@@ -45,12 +45,6 @@ const YTDLP_STRATEGIES = [
   },
 ];
 
-function needsMp3(req) {
-  if (req.headers['x-prefer-format'] === 'mp3') return true;
-  const ua = req.headers['user-agent'] || '';
-  return /iPhone|iPad|iPod/i.test(ua);
-}
-
 const app = express();
 app.use(
   cors({
@@ -152,6 +146,16 @@ async function removeNonMp3Files(videoId) {
       .filter((f) => f.startsWith(videoId) && !f.endsWith('.mp3'))
       .map((f) => unlink(path.join(AUDIO_DIR, f)).catch(() => {})),
   );
+}
+
+async function purgeLegacyAudioFormats() {
+  if (!existsSync(AUDIO_DIR)) return;
+  const files = await readdir(AUDIO_DIR);
+  const legacy = files.filter((f) => /\.(webm|m4a|opus)$/i.test(f));
+  if (legacy.length) {
+    await Promise.all(legacy.map((f) => unlink(path.join(AUDIO_DIR, f)).catch(() => {})));
+    console.log(`Cache legado removido: ${legacy.length} arquivo(s).`);
+  }
 }
 
 function getJsRuntimeArgs() {
@@ -277,8 +281,7 @@ app.post('/api/extract/:videoId', async (req, res) => {
       return res.status(400).json({ error: 'URL ou ID de vídeo inválido.' });
     }
 
-    const mp3Only = needsMp3(req);
-    const audioPath = await getOrCreateExtraction(videoId, { mp3Only });
+    const audioPath = await getOrCreateExtraction(videoId, { mp3Only: true });
     res.json({
       videoId,
       audioUrl: `/api/audio/${videoId}`,
@@ -299,11 +302,10 @@ app.get('/api/audio/:videoId', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido.' });
   }
 
-  const mp3Only = needsMp3(req);
-  let filePath = await findAudioFile(videoId, { mp3Only });
+  let filePath = await findAudioFile(videoId, { mp3Only: true });
 
-  if (!filePath && mp3Only) {
-    filePath = await getOrCreateExtraction(videoId, { mp3Only });
+  if (!filePath) {
+    filePath = await getOrCreateExtraction(videoId, { mp3Only: true });
   }
 
   if (!filePath) {
@@ -312,7 +314,7 @@ app.get('/api/audio/:videoId', async (req, res) => {
 
   const ext = path.extname(filePath).toLowerCase();
 
-  if (mp3Only && ext !== '.mp3') {
+  if (ext !== '.mp3') {
     return res.status(415).json({ error: 'Formato de áudio incompatível com este dispositivo.' });
   }
   const mime =
@@ -331,6 +333,7 @@ app.get('/api/audio/:videoId', async (req, res) => {
 
 app.listen(PORT, async () => {
   await mkdir(AUDIO_DIR, { recursive: true });
+  await purgeLegacyAudioFormats();
   await setupCookies();
   console.log(`Servidor: http://localhost:${PORT}`);
   console.log(`Node: ${NODE_BIN}`);

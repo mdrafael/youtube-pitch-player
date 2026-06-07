@@ -6,3 +6,4 @@ temp-test/
 yt-dlp.exe
 *.log
 .DS_Store
+.vercel

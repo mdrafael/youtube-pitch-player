@@ -1,4 +1,4 @@
-import { extractVideoId, formatPitch, isIOS } from './utils.js';
+import { extractVideoId, formatPitch } from './utils.js';
 import { YouTubePlayerController } from './youtube-player.js';
 import { AudioPitchController } from './audio-pitch.js';
 import { apiUrl } from './config.js';
@@ -123,10 +123,7 @@ async function prepareAudio(videoId) {
   setProgress(true, 15);
   setStatus('Preparando áudio para processamento... Aguarde um momento.', 'info');
 
-  const headers = {};
-  if (isIOS()) {
-    headers['X-Prefer-Format'] = 'mp3';
-  }
+  const headers = { 'X-Prefer-Format': 'mp3' };
 
   const res = await fetch(apiUrl(`/api/extract/${videoId}`), { method: 'POST', headers });
 
