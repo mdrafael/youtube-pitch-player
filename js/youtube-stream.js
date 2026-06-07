@@ -7,6 +7,23 @@ const CLIENTS = [
   { clientName: 'TV_EMBEDDED', clientVersion: '2.0' },
 ];
 
+function buildAudioError(reason = '') {
+  const r = reason.toLowerCase();
+  if (r.includes('unavailable') || r.includes('indisponível') || r.includes('not available')) {
+    return 'Este vídeo não está disponível no YouTube (removido, privado ou bloqueado). Tente outro link.';
+  }
+  if (r.includes('age') || r.includes('idade')) {
+    return 'Este vídeo tem restrição de idade e não pode ser processado automaticamente.';
+  }
+  if (r.includes('private') || r.includes('privad')) {
+    return 'Este vídeo é privado ou restrito.';
+  }
+  if (r.includes('copyright') || r.includes('direitos')) {
+    return 'Este vídeo tem restrição de direitos autorais na sua região.';
+  }
+  return 'Não foi possível obter o áudio. Tente outro vídeo ou aguarde alguns segundos e recarregue a página.';
+}
+
 function pickDirectUrl(adaptiveFormats = []) {
   const audio = adaptiveFormats
     .filter((f) => f.mimeType?.startsWith('audio/') && f.url)
@@ -36,10 +53,12 @@ async function tryDirectInnertube(videoId, client) {
   if (!res.ok) return null;
 
   const data = await res.json();
-  if (data.playabilityStatus?.status !== 'OK') return null;
+  if (data.playabilityStatus?.status !== 'OK') {
+    return { error: data.playabilityStatus?.reason || data.playabilityStatus?.status || '' };
+  }
 
   const picked = pickDirectUrl(data.streamingData?.adaptiveFormats);
-  if (!picked?.url) return null;
+  if (!picked?.url) return { error: 'sem formato de áudio' };
 
   return { streamUrl: picked.url, mimeType: picked.mimeType || 'audio/mp4' };
 }
@@ -54,11 +73,13 @@ async function resolveFromServer(videoId) {
 
 export async function resolveStream(videoId) {
   const serverPromise = resolveFromServer(videoId).catch(() => null);
+  let lastReason = '';
 
   for (const client of CLIENTS) {
     try {
       const result = await tryDirectInnertube(videoId, client);
-      if (result) return result;
+      if (result?.streamUrl) return result;
+      if (result?.error) lastReason = result.error;
     } catch {
       /* próximo */
     }
@@ -67,7 +88,5 @@ export async function resolveStream(videoId) {
   const server = await serverPromise;
   if (server) return server;
 
-  throw new Error(
-    'Não foi possível obter o áudio. Tente outro vídeo ou aguarde alguns segundos e recarregue a página.',
-  );
+  throw new Error(buildAudioError(lastReason));
 }

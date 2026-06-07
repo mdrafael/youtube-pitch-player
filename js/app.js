@@ -144,21 +144,28 @@ async function loadVideo(url) {
       pitchPanel.hidden = false;
       setStatus('Carregando...', 'info');
 
-      const [audioUrl] = await Promise.all([prepareAudio(videoId), youtubePlayer.load(videoId)]);
+      await youtubePlayer.load(videoId);
 
-      youtubePlayer.enforceMute();
-      await audioPitch.load(audioUrl);
-      audioPitch.setPitch(getPitchSemitones());
+      try {
+        const audioUrl = await prepareAudio(videoId);
+        youtubePlayer.enforceMute();
+        await audioPitch.load(audioUrl);
+        audioPitch.setPitch(getPitchSemitones());
+        pitchSlider.disabled = false;
+        resetPitchBtn.disabled = false;
+        setStatus('Pronto! Reproduza o vídeo e ajuste o tom com o slider.', 'success');
+      } catch (audioErr) {
+        pitchSlider.disabled = true;
+        resetPitchBtn.disabled = true;
+        const msg =
+          audioErr?.message === 'Failed to fetch'
+            ? 'Falha de rede. Verifique sua conexão e tente de novo.'
+            : audioErr?.message || 'Erro ao carregar o áudio.';
+        setStatus(msg, 'error');
+      }
 
       currentVideoId = videoId;
-      pitchSlider.disabled = false;
-      resetPitchBtn.disabled = false;
     }
-
-    setStatus(
-      'Pronto! Reproduza o vídeo e ajuste o tom com o slider.',
-      'success',
-    );
   } catch (err) {
     console.error(err);
     const msg =
