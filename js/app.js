@@ -189,6 +189,16 @@ async function prepareAudio(videoId) {
   return audioUrl;
 }
 
+async function checkVideo(videoId) {
+  try {
+    const res = await fetch(apiUrl(`/api/check/${videoId}`));
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 async function loadVideo(url) {
   const videoId = extractVideoId(url);
 
@@ -205,27 +215,46 @@ async function loadVideo(url) {
       stopSync();
       audioPitch.stop();
 
+      const embedCheck = await checkVideo(videoId);
+      if (embedCheck && !embedCheck.ok) {
+        throw new Error(embedCheck.message);
+      }
+
       playerSection.hidden = false;
       pitchPanel.hidden = false;
-      setStatus('Carregando vídeo e áudio...', 'info');
+      setStatus('Carregando vídeo...', 'info');
 
-      const audioUrl = await prepareAudio(videoId);
+      const playerReady = youtubePlayer.load(videoId).then(() => youtubePlayer.enforceMute());
 
-      await youtubePlayer.load(videoId);
-      youtubePlayer.enforceMute();
-
-      await audioPitch.load(audioUrl);
-      audioPitch.setPitch(getPitchSemitones());
+      let audioOk = true;
+      try {
+        const audioUrl = await prepareAudio(videoId);
+        await playerReady;
+        await audioPitch.load(audioUrl);
+        audioPitch.setPitch(getPitchSemitones());
+        pitchSlider.disabled = false;
+        resetPitchBtn.disabled = false;
+      } catch (audioErr) {
+        audioOk = false;
+        await playerReady;
+        pitchSlider.disabled = true;
+        resetPitchBtn.disabled = true;
+        console.error(audioErr);
+        setStatus(
+          `${friendlyError(audioErr)} O vídeo foi carregado abaixo, mas o controle de tom não funciona neste link.`,
+          'error',
+        );
+      }
 
       currentVideoId = videoId;
-      pitchSlider.disabled = false;
-      resetPitchBtn.disabled = false;
-    }
 
-    setStatus(
-      'Pronto! Reproduza o vídeo e ajuste o tom com o slider — o áudio é processado em tempo real.',
-      'success',
-    );
+      if (audioOk) {
+        setStatus(
+          'Pronto! Reproduza o vídeo e ajuste o tom com o slider — o áudio é processado em tempo real.',
+          'success',
+        );
+      }
+    }
   } catch (err) {
     console.error(err);
     setStatus(friendlyError(err), 'error');

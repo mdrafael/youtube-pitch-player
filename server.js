@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { checkVideoEmbeddable } from './lib/check-video.js';
 import { buildAudioError, extractVideoId, resolveAudioStream } from './lib/resolve-audio.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,6 +62,16 @@ app.get('/api/health', (_req, res) => {
     mode: 'resolve-proxy',
     cookiesRequired: false,
   });
+});
+
+app.get('/api/check/:videoId', async (req, res) => {
+  const videoId = extractVideoId(req.params.videoId);
+  if (!videoId) {
+    return res.status(400).json({ error: 'URL ou ID de vídeo inválido.' });
+  }
+
+  const result = await checkVideoEmbeddable(videoId);
+  res.json({ videoId, ...result });
 });
 
 app.get('/api/resolve/:videoId', async (req, res) => {
