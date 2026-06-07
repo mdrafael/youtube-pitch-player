@@ -9,7 +9,15 @@ const CLIENTS = [
 
 function buildAudioError(reason = '') {
   const r = reason.toLowerCase();
-  if (r.includes('unavailable') || r.includes('indisponível') || r.includes('not available')) {
+  if (
+    r.includes('unavailable') ||
+    r.includes('indisponível') ||
+    r.includes('indisponivel') ||
+    r.includes('não está disponível') ||
+    r.includes('nao esta disponivel') ||
+    r.includes('not available') ||
+    r === 'error'
+  ) {
     return 'Este vídeo não está disponível no YouTube (removido, privado ou bloqueado). Tente outro link.';
   }
   if (r.includes('age') || r.includes('idade')) {
@@ -50,9 +58,9 @@ async function tryDirectInnertube(videoId, client) {
     }),
   });
 
-  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!data) return { error: 'resposta inválida' };
 
-  const data = await res.json();
   if (data.playabilityStatus?.status !== 'OK') {
     return { error: data.playabilityStatus?.reason || data.playabilityStatus?.status || '' };
   }
@@ -65,14 +73,16 @@ async function tryDirectInnertube(videoId, client) {
 
 async function resolveFromServer(videoId) {
   const res = await fetch(`/api/resolve?id=${encodeURIComponent(videoId)}`);
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!data.streamUrl) return null;
-  return { streamUrl: data.streamUrl, mimeType: data.mimeType || 'audio/mp4' };
+  const data = await res.json().catch(() => ({}));
+
+  if (res.ok && data.streamUrl) {
+    return { streamUrl: data.streamUrl, mimeType: data.mimeType || 'audio/mp4' };
+  }
+
+  throw new Error(buildAudioError(data.reason || data.error || ''));
 }
 
-export async function resolveStream(videoId) {
-  const serverPromise = resolveFromServer(videoId).catch(() => null);
+async function resolveInBrowser(videoId) {
   let lastReason = '';
 
   for (const client of CLIENTS) {
@@ -85,8 +95,17 @@ export async function resolveStream(videoId) {
     }
   }
 
-  const server = await serverPromise;
-  if (server) return server;
-
   throw new Error(buildAudioError(lastReason));
+}
+
+export async function resolveStream(videoId) {
+  try {
+    return await resolveFromServer(videoId);
+  } catch (serverErr) {
+    if (serverErr?.message && !serverErr.message.includes('Failed to fetch')) {
+      throw serverErr;
+    }
+  }
+
+  return resolveInBrowser(videoId);
 }

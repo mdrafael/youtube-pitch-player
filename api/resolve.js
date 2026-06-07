@@ -8,6 +8,28 @@ const CLIENTS = [
   { clientName: 'WEB', clientVersion: '2.20250217.01.00' },
 ];
 
+function buildAudioError(reason = '') {
+  const r = reason.toLowerCase();
+  if (
+    r.includes('unavailable') ||
+    r.includes('indisponível') ||
+    r.includes('indisponivel') ||
+    r.includes('não está disponível') ||
+    r.includes('nao esta disponivel') ||
+    r.includes('not available') ||
+    r === 'error'
+  ) {
+    return 'Este vídeo não está disponível no YouTube (removido, privado ou bloqueado). Tente outro link.';
+  }
+  if (r.includes('age') || r.includes('idade')) {
+    return 'Este vídeo tem restrição de idade e não pode ser processado automaticamente.';
+  }
+  if (r.includes('private') || r.includes('privad')) {
+    return 'Este vídeo é privado ou restrito.';
+  }
+  return 'Não foi possível obter o áudio deste vídeo.';
+}
+
 function pickDirectUrl(adaptiveFormats = []) {
   const audio = adaptiveFormats
     .filter((f) => f.mimeType?.startsWith('audio/') && f.url)
@@ -27,13 +49,15 @@ async function tryDirectInnertube(videoId, client) {
     }),
   });
 
-  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!data) return { error: 'resposta inválida' };
 
-  const data = await res.json();
-  if (data.playabilityStatus?.status !== 'OK') return null;
+  if (data.playabilityStatus?.status !== 'OK') {
+    return { error: data.playabilityStatus?.reason || data.playabilityStatus?.status || '' };
+  }
 
   const picked = pickDirectUrl(data.streamingData?.adaptiveFormats);
-  if (!picked?.url) return null;
+  if (!picked?.url) return { error: 'sem formato de áudio' };
 
   return { streamUrl: picked.url, mimeType: picked.mimeType || 'audio/mp4', source: client.clientName };
 }
@@ -79,12 +103,15 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   try {
+    let lastReason = '';
+
     for (const client of CLIENTS) {
       const result = await tryDirectInnertube(videoId, client);
-      if (result) {
+      if (result?.streamUrl) {
         res.status(200).json(result);
         return;
       }
+      if (result?.error) lastReason = result.error;
     }
 
     const yt = await resolveWithYoutubei(videoId);
@@ -93,7 +120,10 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.status(500).json({ error: 'Não foi possível obter o áudio deste vídeo.' });
+    res.status(500).json({
+      error: buildAudioError(lastReason),
+      reason: lastReason,
+    });
   } catch (err) {
     console.error('resolve:', err.message);
     res.status(500).json({ error: 'Erro ao resolver áudio.' });
