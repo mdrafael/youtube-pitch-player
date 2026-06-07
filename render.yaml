@@ -3,7 +3,7 @@ services:
     name: youtube-pitch-player
     runtime: node
     plan: free
-    buildCommand: npm install && bash scripts/install-deno.sh
+    buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /api/health
     envVars:

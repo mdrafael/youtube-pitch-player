@@ -1,6 +1,12 @@
-# Como configurar cookies no Render (obrigatório para produção)
+# ~~Cookies no Render~~ (obsoleto)
 
-O YouTube bloqueia servidores na nuvem (Render, Vercel, etc.). A solução é adicionar cookies da sua sessão do YouTube.
+> **A partir da v3, cookies não são mais necessários.** O áudio é resolvido no navegador do usuário; o servidor só faz proxy do stream.
+
+Documentação mantida apenas como referência histórica.
+
+---
+
+O YouTube bloqueia servidores na nuvem (Render, Vercel, etc.). A solução antiga era adicionar cookies da sua sessão do YouTube.
 
 ## Passo 1 — Instalar extensão no Chrome
 

@@ -2,6 +2,7 @@ import { extractVideoId, formatPitch } from './utils.js';
 import { YouTubePlayerController } from './youtube-player.js';
 import { AudioPitchController } from './audio-pitch.js';
 import { apiUrl } from './config.js';
+import { resolveAudioStream } from './youtube-audio-resolver.js';
 
 const YT_PLAYING = 1;
 const YT_PAUSED = 2;
@@ -110,7 +111,7 @@ youtubePlayer.onStateChange = async (state) => {
   }
 };
 
-async function checkServer() {
+async function checkProxy() {
   try {
     const res = await fetch(apiUrl('/api/health'));
     return res.ok;
@@ -119,24 +120,40 @@ async function checkServer() {
   }
 }
 
-async function prepareAudio(videoId) {
-  setProgress(true, 15);
-  setStatus('Preparando áudio para processamento... Aguarde um momento.', 'info');
-
-  const headers = { 'X-Prefer-Format': 'mp3' };
-
-  const res = await fetch(apiUrl(`/api/extract/${videoId}`), { method: 'POST', headers });
-
-  setProgress(true, 90);
+async function createProxyUrl(streamUrl) {
+  const res = await fetch(apiUrl('/api/proxy/session'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ streamUrl }),
+  });
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Não foi possível preparar o áudio do vídeo.');
+    throw new Error(data.error || 'Não foi possível preparar o proxy de áudio.');
   }
 
   const data = await res.json();
+  return apiUrl(data.proxyUrl);
+}
+
+async function prepareAudio(videoId) {
+  setProgress(true, 20);
+  setStatus('Localizando áudio do vídeo no seu navegador...', 'info');
+
+  const { streamUrl } = await resolveAudioStream(videoId);
+
+  setProgress(true, 55);
+  setStatus('Preparando reprodução com processamento de tom...', 'info');
+
+  const proxyOk = await checkProxy();
+  if (!proxyOk) {
+    throw new Error('Serviço de áudio indisponível no momento. Tente novamente em instantes.');
+  }
+
+  const audioUrl = await createProxyUrl(streamUrl);
+
   setProgress(true, 100);
-  return apiUrl(data.audioUrl);
+  return audioUrl;
 }
 
 async function loadVideo(url) {
@@ -144,12 +161,6 @@ async function loadVideo(url) {
 
   if (!videoId) {
     setStatus('URL inválida. Use um link do YouTube.', 'error');
-    return;
-  }
-
-  const serverOk = await checkServer();
-  if (!serverOk) {
-    setStatus('Serviço de áudio indisponível no momento. Tente novamente em instantes.', 'error');
     return;
   }
 
@@ -214,6 +225,6 @@ pitchSlider.disabled = true;
 resetPitchBtn.disabled = true;
 updatePitchDisplay(0);
 
-checkServer().then((ok) => {
+checkProxy().then((ok) => {
   if (!ok) setStatus('Aguardando conexão com o serviço de áudio...', 'info');
 });

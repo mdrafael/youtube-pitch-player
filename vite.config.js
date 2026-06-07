@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   root: '.',
   optimizeDeps: {
-    include: ['@soundtouchjs/audio-worklet'],
+    include: ['@soundtouchjs/audio-worklet', 'youtubei.js/web'],
   },
   server: {
     port: 5173,
