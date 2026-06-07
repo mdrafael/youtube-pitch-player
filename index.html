@@ -19,44 +19,74 @@
           <span class="logo-icon" aria-hidden="true">♪</span>
           <h1>YouTube Pitch Player</h1>
         </div>
-        <p class="subtitle">Incorpore vídeos e ajuste o tom do áudio em tempo real</p>
+        <p class="subtitle">Extraia o áudio e ajuste o tom em tempo real</p>
       </header>
 
       <main class="main">
-        <section class="input-section" aria-label="Carregar vídeo">
-          <form id="load-form" class="url-form">
-            <label for="video-url" class="sr-only">URL do vídeo do YouTube</label>
-            <div class="url-input-wrap">
-              <input
-                type="url"
-                id="video-url"
-                name="video-url"
-                placeholder="Cole o link do YouTube..."
-                autocomplete="off"
-                required
-              />
-              <button type="submit" id="load-btn" class="btn btn-primary">
-                <span class="btn-text">Carregar vídeo</span>
-                <span class="btn-spinner" hidden aria-hidden="true"></span>
-              </button>
-            </div>
-          </form>
+        <section class="input-section" aria-label="Fonte de áudio">
+          <div class="tabs" role="tablist">
+            <button type="button" id="tab-yt" class="tab active" role="tab" aria-selected="true">
+              YouTube
+            </button>
+            <button type="button" id="tab-file" class="tab" role="tab" aria-selected="false">
+              Arquivo MP3
+            </button>
+          </div>
+
+          <div id="panel-yt" class="tab-panel">
+            <form id="yt-form" class="url-form">
+              <label for="video-url" class="sr-only">URL do YouTube</label>
+              <div class="url-input-wrap">
+                <input
+                  type="url"
+                  id="video-url"
+                  placeholder="Cole o link do YouTube..."
+                  autocomplete="off"
+                  required
+                />
+                <button type="submit" id="extract-btn" class="btn btn-primary">
+                  <span class="btn-text">Extrair áudio</span>
+                  <span class="btn-spinner" hidden aria-hidden="true"></span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div id="panel-file" class="tab-panel" hidden>
+            <form id="file-form" class="file-form">
+              <label for="audio-file" class="file-label">
+                <span class="file-label-text">Escolher MP3 ou outro áudio</span>
+                <input type="file" id="audio-file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.aac,.flac" />
+              </label>
+              <p class="file-hint">Funciona offline — ideal quando o YouTube bloqueia a extração.</p>
+            </form>
+          </div>
 
           <progress id="progress-bar" class="progress-bar" max="100" value="0" hidden></progress>
           <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
         </section>
 
         <section id="player-section" class="player-section" hidden>
-          <div class="video-wrapper">
-            <div id="youtube-player"></div>
+          <div class="transport">
+            <button type="button" id="play-btn" class="btn btn-primary play-btn" disabled>▶ Tocar</button>
+            <input
+              type="range"
+              id="seek-slider"
+              class="seek-slider"
+              min="0"
+              max="1000"
+              value="0"
+              aria-label="Posição"
+              disabled
+            />
+            <span id="time-display" class="time-display">0:00 / 0:00</span>
           </div>
 
-          <div id="pitch-panel" class="pitch-panel" hidden>
+          <div class="pitch-panel">
             <div class="pitch-header">
-              <h2>Tom do áudio (pitch)</h2>
+              <h2>Tom (pitch)</h2>
               <span id="pitch-value" class="pitch-value">0 semitons</span>
             </div>
-
             <div class="pitch-controls">
               <span class="pitch-label" aria-hidden="true">−</span>
               <input
@@ -68,28 +98,24 @@
                 step="0.5"
                 value="0"
                 aria-label="Tom em semitons"
+                disabled
               />
               <span class="pitch-label" aria-hidden="true">+</span>
             </div>
-
             <div class="pitch-actions">
-              <button type="button" id="reset-pitch-btn" class="btn btn-secondary">Resetar tom</button>
+              <button type="button" id="reset-pitch-btn" class="btn btn-secondary" disabled>
+                Resetar tom
+              </button>
             </div>
-
-            <p class="pitch-hint">
-              O vídeo fica mudo; o áudio é processado em tempo real com Web Audio. Se não carregar,
-              recarregue a página com Ctrl+F5 (limpa cache antigo).
-            </p>
           </div>
         </section>
       </main>
 
       <footer class="footer">
-        <p>YouTube IFrame API · Web Audio · SoundTouch · 100% no navegador</p>
+        <p>Extrai áudio · Web Audio · SoundTouch · Windows, Android e iOS</p>
       </footer>
     </div>
 
-    <script src="https://www.youtube.com/iframe_api"></script>
     <script type="module" src="/js/app.js"></script>
   </body>
 </html>

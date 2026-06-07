@@ -1,7 +1,7 @@
 {
   "name": "youtube-pitch-player",
-  "version": "5.1.4",
-  "description": "YouTube embed com controle de pitch — 100% no navegador",
+  "version": "6.0.0",
+  "description": "Extrai áudio do YouTube ou MP3 e ajusta o tom em tempo real",
   "type": "module",
   "scripts": {
     "dev": "vite",

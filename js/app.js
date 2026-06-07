@@ -1,38 +1,32 @@
-import { extractVideoId, formatPitch } from './utils.js';
-import { YouTubePlayerController } from './youtube-player.js';
+import { extractVideoId, formatPitch, formatTime } from './utils.js';
 import { AudioPitchController } from './audio-pitch.js';
-import { mediaProxyUrl } from './media.js';
-import { resolveStream } from './youtube-stream.js';
+import { extractFromYouTube } from './extract-audio.js';
 import { cleanupLegacyServiceWorker } from './sw-cleanup.js';
 
-const YT_PLAYING = 1;
-const YT_PAUSED = 2;
-const YT_BUFFERING = 3;
-const YT_ENDED = 0;
-
-const form = document.getElementById('load-form');
+const ytForm = document.getElementById('yt-form');
+const fileForm = document.getElementById('file-form');
 const urlInput = document.getElementById('video-url');
-const loadBtn = document.getElementById('load-btn');
-const btnText = loadBtn.querySelector('.btn-text');
-const btnSpinner = loadBtn.querySelector('.btn-spinner');
+const fileInput = document.getElementById('audio-file');
+const extractBtn = document.getElementById('extract-btn');
+const btnText = extractBtn.querySelector('.btn-text');
+const btnSpinner = extractBtn.querySelector('.btn-spinner');
 const statusMessage = document.getElementById('status-message');
 const progressBar = document.getElementById('progress-bar');
 const playerSection = document.getElementById('player-section');
-const pitchPanel = document.getElementById('pitch-panel');
 const pitchSlider = document.getElementById('pitch-slider');
 const pitchValue = document.getElementById('pitch-value');
 const resetPitchBtn = document.getElementById('reset-pitch-btn');
+const playBtn = document.getElementById('play-btn');
+const seekSlider = document.getElementById('seek-slider');
+const timeDisplay = document.getElementById('time-display');
+const tabYt = document.getElementById('tab-yt');
+const tabFile = document.getElementById('tab-file');
+const panelYt = document.getElementById('panel-yt');
+const panelFile = document.getElementById('panel-file');
 
-const youtubePlayer = new YouTubePlayerController('youtube-player');
 const audioPitch = new AudioPitchController();
-
-let currentVideoId = null;
-let syncInterval = null;
 let isLoading = false;
-
-function getPitchSemitones() {
-  return parseFloat(pitchSlider.value) || 0;
-}
+let seekInterval = null;
 
 function setStatus(message, type = 'info') {
   statusMessage.textContent = message;
@@ -46,11 +40,13 @@ function setProgress(visible, percent = 0) {
 
 function setLoading(loading) {
   isLoading = loading;
-  loadBtn.disabled = loading;
+  extractBtn.disabled = loading;
+  fileInput.disabled = loading;
   btnText.hidden = loading;
   btnSpinner.hidden = !loading;
   pitchSlider.disabled = loading;
   resetPitchBtn.disabled = loading;
+  playBtn.disabled = loading;
 }
 
 function updatePitchDisplay(semitones) {
@@ -58,137 +54,146 @@ function updatePitchDisplay(semitones) {
   pitchSlider.value = String(semitones);
 }
 
-function stopSync() {
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
+function updateTimeDisplay() {
+  const cur = audioPitch.getCurrentTime();
+  const dur = audioPitch.getDuration();
+  timeDisplay.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+  if (dur > 0) seekSlider.value = String((cur / dur) * 1000);
+}
+
+function startSeekSync() {
+  stopSeekSync();
+  seekInterval = setInterval(() => {
+    if (!audioPitch.isReady) return;
+    updateTimeDisplay();
+    playBtn.textContent = audioPitch.isPlaying() ? '⏸ Pausar' : '▶ Tocar';
+  }, 250);
+}
+
+function stopSeekSync() {
+  if (seekInterval) {
+    clearInterval(seekInterval);
+    seekInterval = null;
   }
 }
 
-function startSync() {
-  stopSync();
-  syncInterval = setInterval(() => {
-    if (!currentVideoId) return;
-    const ytTime = youtubePlayer.getCurrentTime();
-    const audioTime = audioPitch.getCurrentTime();
-    if (Math.abs(ytTime - audioTime) > 0.35) {
-      audioPitch.seek(ytTime);
-    }
-  }, 1000);
+async function loadBlob(blob) {
+  playerSection.hidden = false;
+  setStatus('Preparando áudio...', 'info');
+  await audioPitch.loadBlob(blob);
+  audioPitch.setPitch(parseFloat(pitchSlider.value) || 0);
+  pitchSlider.disabled = false;
+  resetPitchBtn.disabled = false;
+  playBtn.disabled = false;
+  seekSlider.disabled = false;
+  updateTimeDisplay();
+  startSeekSync();
+  setStatus('Áudio pronto! Ajuste o tom e pressione Tocar.', 'success');
 }
 
-async function syncAudioToVideo(play = false) {
-  const time = youtubePlayer.getCurrentTime();
-  audioPitch.seek(time);
-  audioPitch.setPitch(getPitchSemitones());
-  if (play) {
-    await audioPitch.play();
-    startSync();
-  }
-}
-
-youtubePlayer.onStateChange = async (state) => {
-  if (!audioPitch.isReady) return;
-
-  switch (state) {
-    case YT_PLAYING:
-      await syncAudioToVideo(true);
-      break;
-    case YT_PAUSED:
-      audioPitch.pause();
-      stopSync();
-      break;
-    case YT_BUFFERING:
-      audioPitch.seek(youtubePlayer.getCurrentTime());
-      audioPitch.pause();
-      break;
-    case YT_ENDED:
-      audioPitch.pause();
-      audioPitch.seek(0);
-      stopSync();
-      break;
-    default:
-      break;
-  }
-};
-
-async function prepareAudio(videoId) {
-  setProgress(true, 25);
-  setStatus('Localizando áudio...', 'info');
-
-  const { streamUrl } = await resolveStream(videoId);
-
-  setProgress(true, 70);
-  setStatus('Preparando processamento de tom...', 'info');
-
-  return await mediaProxyUrl(streamUrl);
-}
-
-async function loadVideo(url) {
+async function extractYouTube(url) {
   const videoId = extractVideoId(url);
-
   if (!videoId) {
-    setStatus('URL inválida. Use um link do YouTube.', 'error');
+    setStatus('URL inválida. Cole um link do YouTube.', 'error');
     return;
   }
 
   setLoading(true);
-  setProgress(true, 5);
+  setProgress(true, 0);
+  setStatus('Extraindo áudio do YouTube...', 'info');
 
   try {
-    if (currentVideoId !== videoId) {
-      stopSync();
-      audioPitch.stop();
+    stopSeekSync();
+    audioPitch.stop();
 
-      playerSection.hidden = false;
-      pitchPanel.hidden = false;
-      setStatus('Carregando...', 'info');
+    const { blob } = await extractFromYouTube(videoId, (pct) => {
+      setProgress(true, pct);
+      if (pct < 100) setStatus(`Baixando áudio... ${pct}%`, 'info');
+    });
 
-      await youtubePlayer.load(videoId);
-
-      try {
-        const audioUrl = await prepareAudio(videoId);
-        youtubePlayer.enforceMute();
-        await audioPitch.load(audioUrl);
-        audioPitch.setPitch(getPitchSemitones());
-        pitchSlider.disabled = false;
-        resetPitchBtn.disabled = false;
-        setStatus('Pronto! Reproduza o vídeo e ajuste o tom com o slider.', 'success');
-      } catch (audioErr) {
-        pitchSlider.disabled = true;
-        resetPitchBtn.disabled = true;
-        const msg =
-          audioErr?.message === 'Failed to fetch'
-            ? 'Falha de rede. Verifique sua conexão e tente de novo.'
-            : audioErr?.message || 'Erro ao carregar o áudio.';
-        setStatus(msg, 'error');
-      }
-
-      currentVideoId = videoId;
-    }
+    await loadBlob(blob);
   } catch (err) {
     console.error(err);
     const msg =
       err?.message === 'Failed to fetch'
-        ? 'Falha de rede. Verifique sua conexão e tente de novo.'
-        : err?.message || 'Erro ao carregar.';
+        ? 'Falha de rede. Verifique sua conexão.'
+        : err?.message || 'Erro ao extrair.';
     setStatus(msg, 'error');
   } finally {
     setLoading(false);
-    setTimeout(() => setProgress(false), 600);
+    setTimeout(() => setProgress(false), 800);
   }
 }
 
-form.addEventListener('submit', (e) => {
+async function loadFile(file) {
+  if (!file) return;
+
+  const ok = /^audio\//.test(file.type) || /\.(mp3|m4a|wav|ogg|aac|flac|webm)$/i.test(file.name);
+  if (!ok) {
+    setStatus('Envie um arquivo de áudio (MP3, M4A, WAV, etc.).', 'error');
+    return;
+  }
+
+  setLoading(true);
+  setProgress(true, 50);
+  setStatus('Carregando arquivo...', 'info');
+
+  try {
+    stopSeekSync();
+    audioPitch.stop();
+    await loadBlob(file);
+    setProgress(true, 100);
+  } catch (err) {
+    console.error(err);
+    setStatus(err?.message || 'Erro ao carregar arquivo.', 'error');
+  } finally {
+    setLoading(false);
+    setTimeout(() => setProgress(false), 800);
+  }
+}
+
+function switchTab(tab) {
+  const isYt = tab === 'yt';
+  tabYt.classList.toggle('active', isYt);
+  tabFile.classList.toggle('active', !isYt);
+  tabYt.setAttribute('aria-selected', String(isYt));
+  tabFile.setAttribute('aria-selected', String(!isYt));
+  panelYt.hidden = !isYt;
+  panelFile.hidden = isYt;
+}
+
+ytForm.addEventListener('submit', (e) => {
   e.preventDefault();
   if (isLoading) return;
-  loadVideo(urlInput.value);
+  extractYouTube(urlInput.value);
+});
+
+fileForm.addEventListener('change', (e) => {
+  if (isLoading) return;
+  const file = e.target.files?.[0];
+  if (file) loadFile(file);
+});
+
+tabYt.addEventListener('click', () => switchTab('yt'));
+tabFile.addEventListener('click', () => switchTab('file'));
+
+playBtn.addEventListener('click', async () => {
+  await audioPitch.resumeContext();
+  await audioPitch.togglePlay();
+  playBtn.textContent = audioPitch.isPlaying() ? '⏸ Pausar' : '▶ Tocar';
+});
+
+seekSlider.addEventListener('input', () => {
+  const dur = audioPitch.getDuration();
+  if (dur > 0) audioPitch.seek((parseFloat(seekSlider.value) / 1000) * dur);
+  updateTimeDisplay();
 });
 
 pitchSlider.addEventListener('input', async () => {
   await audioPitch.resumeContext();
-  audioPitch.setPitch(getPitchSemitones());
-  updatePitchDisplay(getPitchSemitones());
+  const semitones = parseFloat(pitchSlider.value) || 0;
+  audioPitch.setPitch(semitones);
+  updatePitchDisplay(semitones);
 });
 
 resetPitchBtn.addEventListener('click', () => {
@@ -199,6 +204,7 @@ resetPitchBtn.addEventListener('click', () => {
 
 pitchSlider.disabled = true;
 resetPitchBtn.disabled = true;
+playBtn.disabled = true;
+seekSlider.disabled = true;
 updatePitchDisplay(0);
-
 cleanupLegacyServiceWorker();

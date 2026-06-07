@@ -1,9 +1,6 @@
 import { SoundTouchNode } from '@soundtouchjs/audio-worklet';
 import processorUrl from '@soundtouchjs/audio-worklet/processor?url';
 
-/**
- * Áudio com pitch em tempo real — Web Audio + SoundTouch.
- */
 export class AudioPitchController {
   constructor() {
     this.audioContext = null;
@@ -14,6 +11,7 @@ export class AudioPitchController {
     this.semitones = 0;
     this.isReady = false;
     this._registerPromise = null;
+    this._objectUrl = null;
   }
 
   async init() {
@@ -46,17 +44,32 @@ export class AudioPitchController {
     this.setPitch(0);
   }
 
-  async load(audioUrl) {
+  _revokeObjectUrl() {
+    if (this._objectUrl) {
+      URL.revokeObjectURL(this._objectUrl);
+      this._objectUrl = null;
+    }
+  }
+
+  async loadBlob(blob) {
     await this.init();
     this.stop();
 
-    this.audioElement.src = audioUrl;
+    this._revokeObjectUrl();
+    this._objectUrl = URL.createObjectURL(blob);
+    this.audioElement.src = this._objectUrl;
 
+    await this._waitForReady();
+    await this.resumeContext();
+    this.isReady = true;
+  }
+
+  async _waitForReady() {
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error('Tempo esgotado ao carregar o áudio.'));
-      }, 90000);
+        reject(new Error('Tempo esgotado ao preparar o áudio.'));
+      }, 120000);
 
       let settled = false;
       const onReady = () => {
@@ -69,7 +82,7 @@ export class AudioPitchController {
         if (settled) return;
         settled = true;
         cleanup();
-        reject(new Error('Erro ao carregar o áudio.'));
+        reject(new Error('Erro ao reproduzir o áudio.'));
       };
       const cleanup = () => {
         clearTimeout(timeout);
@@ -85,9 +98,6 @@ export class AudioPitchController {
       this.audioElement.addEventListener('error', onError, { once: true });
       this.audioElement.load();
     });
-
-    await this.resumeContext();
-    this.isReady = true;
   }
 
   async resumeContext() {
@@ -121,6 +131,15 @@ export class AudioPitchController {
     this.audioElement?.pause();
   }
 
+  togglePlay() {
+    if (this.isPlaying()) this.pause();
+    else return this.play();
+  }
+
+  isPlaying() {
+    return this.audioElement ? !this.audioElement.paused : false;
+  }
+
   seek(seconds) {
     if (!this.audioElement || !Number.isFinite(seconds)) return;
     try {
@@ -134,11 +153,17 @@ export class AudioPitchController {
     return this.audioElement?.currentTime ?? 0;
   }
 
+  getDuration() {
+    const d = this.audioElement?.duration;
+    return Number.isFinite(d) ? d : 0;
+  }
+
   stop() {
     if (!this.audioElement) return;
     this.audioElement.pause();
     this.audioElement.removeAttribute('src');
     this.audioElement.load();
+    this._revokeObjectUrl();
     this.isReady = false;
   }
 
