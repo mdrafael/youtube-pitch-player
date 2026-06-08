@@ -1,6 +1,6 @@
 {
   "name": "youtube-pitch-player",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "description": "Extrai áudio do YouTube ou MP3 e ajusta o tom em tempo real",
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@soundtouchjs/audio-worklet": "^2.0.3",
+    "youtube-po-token-generator": "^0.6.0",
     "youtubei.js": "^17.0.1"
   },
   "devDependencies": {

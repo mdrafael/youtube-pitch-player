@@ -1,8 +1,12 @@
+import { Innertube } from 'youtubei.js';
+
 const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLgcilh_Y_0jcqok';
 
 const CLIENTS = [
   { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 30 },
+  { clientName: 'ANDROID', clientVersion: '19.09.37', androidSdkVersion: 30 },
   { clientName: 'IOS', clientVersion: '19.45.4', deviceModel: 'iPhone16,2', osVersion: '17.5.1' },
+  { clientName: 'ANDROID_VR', clientVersion: '1.57.29', deviceModel: 'Quest 3', androidSdkVersion: 32 },
   { clientName: 'MWEB', clientVersion: '2.20250217.01.00' },
   { clientName: 'TV_EMBEDDED', clientVersion: '2.0' },
   { clientName: 'WEB', clientVersion: '2.20250217.01.00' },
@@ -10,6 +14,9 @@ const CLIENTS = [
 
 function buildAudioError(reason = '') {
   const r = reason.toLowerCase();
+  if (r.includes('bot') || r.includes('login')) {
+    return 'YouTube bloqueou o servidor. O app tentará pelo seu navegador automaticamente.';
+  }
   if (
     r.includes('unavailable') ||
     r.includes('indisponível') ||
@@ -17,15 +24,10 @@ function buildAudioError(reason = '') {
     r.includes('não está disponível') ||
     r.includes('nao esta disponivel') ||
     r.includes('not available') ||
-    r === 'error'
+    r === 'error' ||
+    r === 'unplayable'
   ) {
-    return 'Este vídeo não está disponível no YouTube (removido, privado ou bloqueado). Tente outro link.';
-  }
-  if (r.includes('age') || r.includes('idade')) {
-    return 'Este vídeo tem restrição de idade e não pode ser processado automaticamente.';
-  }
-  if (r.includes('private') || r.includes('privad')) {
-    return 'Este vídeo é privado ou restrito.';
+    return 'Este vídeo não está disponível no YouTube.';
   }
   return 'Não foi possível obter o áudio deste vídeo.';
 }
@@ -62,11 +64,20 @@ async function tryDirectInnertube(videoId, client) {
   return { streamUrl: picked.url, mimeType: picked.mimeType || 'audio/mp4', source: client.clientName };
 }
 
-async function resolveWithYoutubei(videoId) {
-  const { Innertube } = await import('youtubei.js');
-  const innertube = await Innertube.create();
+async function createInnertube() {
+  try {
+    const { generate } = await import('youtube-po-token-generator');
+    const { visitorData, poToken } = await generate();
+    return Innertube.create({ visitor_data: visitorData, po_token: poToken });
+  } catch {
+    return Innertube.create();
+  }
+}
 
-  for (const client of ['ANDROID', 'IOS', 'TV_EMBEDDED', 'WEB', 'MWEB']) {
+async function resolveWithYoutubei(videoId) {
+  const innertube = await createInnertube();
+
+  for (const client of ['ANDROID', 'IOS', 'ANDROID_VR', 'WEB', 'MWEB', 'TV_EMBEDDED']) {
     try {
       const info = await innertube.getBasicInfo(videoId, { client });
       if (info.playability_status?.status !== 'OK') continue;

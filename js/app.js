@@ -100,7 +100,7 @@ async function extractYouTube(url) {
 
   setLoading(true);
   setProgress(true, 0);
-  setStatus('Extraindo áudio do YouTube...', 'info');
+  setStatus('Extraindo áudio (pelo seu navegador)...', 'info');
 
   try {
     stopSeekSync();
